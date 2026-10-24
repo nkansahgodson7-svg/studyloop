@@ -99,6 +99,57 @@ export async function* groqDeltas(apiKey: string, system: string, question: stri
   }
 }
 
+export interface ChatMessageRow {
+  id: number;
+  notebookId: number;
+  role: 'user' | 'assistant';
+  content: string;
+  citations: CitationItem[];
+  createdAt: string;
+}
+
+function rowToMessage(row: Record<string, unknown>): ChatMessageRow {
+  let citations: CitationItem[] = [];
+  try {
+    citations = JSON.parse(String(row.citations)) as CitationItem[];
+  } catch {
+    citations = [];
+  }
+  return {
+    id: Number(row.id),
+    notebookId: Number(row.notebook_id),
+    role: row.role === 'user' ? 'user' : 'assistant',
+    content: String(row.content),
+    citations,
+    createdAt: String(row.created_at)
+  };
+}
+
+export async function listChatMessages(db: Client, notebookId: number): Promise<ChatMessageRow[]> {
+  const result = await db.execute({
+    sql: 'SELECT id, notebook_id, role, content, citations, created_at FROM chat_messages WHERE notebook_id = ? ORDER BY id',
+    args: [notebookId]
+  });
+  return result.rows.map(rowToMessage);
+}
+
+export async function chatMessagesGet(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  try {
+    const user = await requireUser(db, req);
+    const notebookId = Number(idRaw);
+    if (!Number.isInteger(notebookId)) {
+      return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+    const notebook = await ownNotebook(db, user.id, notebookId);
+    if (!notebook) {
+      return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+    return NextResponse.json({ messages: await listChatMessages(db, notebookId) });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
 function sseFrame(payload: Record<string, unknown>): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }

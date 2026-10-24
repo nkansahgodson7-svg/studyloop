@@ -2,6 +2,7 @@
 
 import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { Chat } from '@/components/Chat';
 
 interface SourceRow {
   id: number;
@@ -234,6 +235,8 @@ export default function NotebookDetailPage({ params }: { params: Promise<{ id: s
           </ul>
         )}
       </section>
+
+      <Chat notebookId={Number(id)} />
     </main>
   );
 }

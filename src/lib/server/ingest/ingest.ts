@@ -106,6 +106,8 @@ export async function searchChunks(db: Client, notebookId: number, query: string
   if (match.length === 0) {
     return [];
   }
+  const terms = match.split(/\s+/).filter(Boolean);
+  const ftsQuery = terms.length > 1 ? terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' OR ') : match;
   const result = await db.execute({
     sql: `SELECT sc.id AS id, sc.source_id AS source_id, sc.ord AS ord, sc.text AS text,
                  bm25(source_chunks_fts) AS rank
@@ -115,7 +117,7 @@ export async function searchChunks(db: Client, notebookId: number, query: string
           WHERE source_chunks_fts MATCH ? AND s.notebook_id = ?
           ORDER BY rank
           LIMIT ?`,
-    args: [match, notebookId, k]
+    args: [ftsQuery, notebookId, k]
   });
   return result.rows.map((row) => ({
     id: Number(row['id']),

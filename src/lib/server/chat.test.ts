@@ -8,7 +8,7 @@ import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
 import { createNotebook } from './notebooks';
 import { createUser, createSession } from './repo';
-import { chatStream, REFUSAL_MESSAGE, resolveLlmKey } from './chat';
+import { chatStream, chatMessagesGet, REFUSAL_MESSAGE, resolveLlmKey } from './chat';
 import { ingestTextSource } from './ingest/ingest';
 
 function makeRequest(url: string, body: string, token: string | null): Request {
@@ -189,6 +189,34 @@ describe('chat()', () => {
     const res = await chatStream(
       db,
       makeRequest(`http://x/api/notebooks/${notebookId}/chat`, JSON.stringify({ question: 'hello?' }), foreignToken),
+      String(notebookId)
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('lists history ascending with parsed citations for the owner', async () => {
+    await db.execute({
+      sql: "INSERT INTO chat_messages (notebook_id, role, content, citations) VALUES (?, 'user', 'first question', '[]'), (?, 'assistant', 'first answer', ?)",
+      args: [notebookId, notebookId, JSON.stringify([{ n: 1, sourceId: 1, ord: 0, sourceTitle: 'Cell Biology Notes' }])]
+    });
+    const res = await chatMessagesGet(
+      db,
+      makeRequest(`http://x/api/notebooks/${notebookId}/chat/messages`, '', token),
+      String(notebookId)
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { messages: Array<{ role: string; content: string; citations: unknown[] }> };
+    expect(body.messages.length).toBeGreaterThanOrEqual(2);
+    const contents = body.messages.map((message) => message.content);
+    expect(contents.indexOf('first question')).toBeLessThan(contents.indexOf('first answer'));
+    const cited = body.messages.find((message) => message.content === 'first answer');
+    expect(cited?.citations[0]).toMatchObject({ n: 1, sourceTitle: 'Cell Biology Notes' });
+  });
+
+  it('answers 404 for history of a foreign notebook', async () => {
+    const res = await chatMessagesGet(
+      db,
+      makeRequest(`http://x/api/notebooks/${notebookId}/chat/messages`, '', foreignToken),
       String(notebookId)
     );
     expect(res.status).toBe(404);
