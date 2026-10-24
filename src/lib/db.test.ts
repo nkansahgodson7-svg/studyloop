@@ -1,0 +1,79 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { applySchema, makeLocalDb } from './db';
+
+describe('db: schema + FTS', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'studyloop-db-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function seedNotebookWithChunk(name: string) {
+    const db = makeLocalDb(join(dir, `${name}.db`));
+    await applySchema(db);
+    const u = await db.execute({
+      sql: 'INSERT INTO users (email, pw_hash, role) VALUES (?, ?, ?)',
+      args: ['x@y.test', 'testhash', 'admin']
+    });
+    const n = await db.execute({
+      sql: 'INSERT INTO notebooks (user_id, title) VALUES (?, ?)',
+      args: [u.lastInsertRowid!, 'Bio 101']
+    });
+    const s = await db.execute({
+      sql: "INSERT INTO sources (notebook_id, kind, title, url, text) VALUES (?, 'text', 'Lecture 1', NULL, 'body')",
+      args: [n.lastInsertRowid!]
+    });
+    return {
+      db,
+      user: Number(u.lastInsertRowid),
+      notebook: Number(n.lastInsertRowid),
+      source: Number(s.lastInsertRowid)
+    };
+  }
+
+  it('full-text search returns the chunk matching the query', async () => {
+    const { db, source } = await seedNotebookWithChunk('fts-hit');
+    const c = await db.execute({
+      sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, ?, ?)',
+      args: [source, 0, 'The neuron is the basic cell of the nervous system.']
+    });
+
+    await applySchema(db); // idempotent: IF NOT EXISTS everywhere
+
+    const hit = await db.execute(
+      "SELECT rowid FROM source_chunks_fts WHERE source_chunks_fts MATCH 'neuron'"
+    );
+    expect(hit.rows).toHaveLength(1);
+    expect(hit.rows[0]!['rowid']).toBe(Number(c.lastInsertRowid));
+
+    const miss = await db.execute(
+      "SELECT rowid FROM source_chunks_fts WHERE source_chunks_fts MATCH 'quantum'"
+    );
+    expect(miss.rows).toHaveLength(0);
+  });
+
+  it('deleting a notebook cascades chunks and keeps FTS in sync', async () => {
+    const { db, source } = await seedNotebookWithChunk('cascade');
+    await db.execute({
+      sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, ?, ?)',
+      args: [source, 0, 'Arithmetic circuits in the cerebellum.']
+    });
+
+    await db.execute('DELETE FROM notebooks');
+
+    const chunks = await db.execute('SELECT COUNT(*) AS n FROM source_chunks');
+    expect(chunks.rows[0]!['n']).toBe(0);
+
+    const fts = await db.execute(
+      "SELECT rowid FROM source_chunks_fts WHERE source_chunks_fts MATCH 'cerebellum'"
+    );
+    expect(fts.rows).toHaveLength(0);
+  });
+});
