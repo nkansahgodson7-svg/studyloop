@@ -2,7 +2,9 @@ import type { Client } from '@libsql/client';
 import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from './auth';
 import { ownNotebook } from './notebooks';
-import { ingestTextSource, listSources } from './ingest/ingest';
+import { ingestTextSource, listSources, SOURCE_KINDS, type IngestableKind } from './ingest/ingest';
+
+const MAX_SOURCE_TEXT = 2_000_000;
 
 function statusForCode(code: string): number {
   if (code === 'INVALID_TEXT') return 400;
@@ -28,13 +30,20 @@ export async function textSourceCreate(db: Client, req: Request, idRaw: string):
     } catch {
       return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
     }
-    const body = parsedBody as { title?: unknown; text?: unknown };
+    const body = parsedBody as { title?: unknown; text?: unknown; kind?: unknown };
     if (typeof body.text !== 'string') {
       return NextResponse.json({ error: 'text required' }, { status: 400 });
     }
+    if (body.text.length > MAX_SOURCE_TEXT) {
+      return NextResponse.json({ error: 'source text too large' }, { status: 413 });
+    }
+    if (body.kind != null && !SOURCE_KINDS.includes(body.kind as IngestableKind)) {
+      return NextResponse.json({ error: 'unsupported source kind' }, { status: 400 });
+    }
     const title = typeof body.title === 'string' ? body.title : undefined;
+    const kind = body.kind as IngestableKind | undefined;
 
-    const result = await ingestTextSource(db, { notebookId, userId: user.id, title, text: body.text });
+    const result = await ingestTextSource(db, { notebookId, userId: user.id, title, text: body.text, kind });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if ((error as CodedError).code) {

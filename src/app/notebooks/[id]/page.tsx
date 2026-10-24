@@ -11,6 +11,8 @@ interface SourceRow {
   createdAt: string;
 }
 
+const MAX_PDF_BYTES = 40 * 1024 * 1024;
+
 type NotebookState = 'loading' | 'missing';
 
 export default function NotebookDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,6 +23,46 @@ export default function NotebookDetailPage({ params }: { params: Promise<{ id: s
   const [srcTitle, setSrcTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function handlePdf(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError(null);
+    setNotice(null);
+
+    if (file.size > MAX_PDF_BYTES) {
+      setError('PDF is larger than 40 MB.');
+      return;
+    }
+    setPdfBusy(true);
+    try {
+      const { extractPdfText } = await import('@/lib/pdf/extract');
+      const { pageCount, text } = await extractPdfText(await file.arrayBuffer());
+      if (text.length < 20) {
+        setError('PDF had no extractable text (is it scanned images?).');
+        return;
+      }
+      const res = await fetch(`/api/notebooks/${id}/sources`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: file.name, text, kind: 'pdf' })
+      });
+      if (res.status === 201) {
+        const body = (await res.json()) as { chunks: number };
+        setNotice(`Saved PDF (${pageCount} pages) — split into ${body.chunks} searchable chunk${body.chunks === 1 ? '' : 's'}.`);
+        await load();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setError(body?.error ?? `PDF save failed (${res.status})`);
+    } catch (extractError) {
+      setError(extractError instanceof Error ? extractError.message : 'PDF extraction failed');
+    } finally {
+      setPdfBusy(false);
+    }
+  }
 
   const load = useCallback(async () => {
     const listRes = await fetch('/api/notebooks');
@@ -115,6 +157,23 @@ export default function NotebookDetailPage({ params }: { params: Promise<{ id: s
           />
           <button type="submit">Save source</button>
         </form>
+
+        <form
+          aria-label="Add a PDF source"
+          onSubmit={(e) => {
+            e.preventDefault();
+          }}
+        >
+          <label htmlFor="pdf-file">Upload PDF (up to 100 pages, 40 MB)</label>
+          <input
+            id="pdf-file"
+            type="file"
+            accept="application/pdf,.pdf"
+            onChange={(e) => void handlePdf(e)}
+            disabled={pdfBusy}
+          />
+        </form>
+        {pdfBusy ? <p role="status" aria-busy="true">Extracting PDF…</p> : null}
       </section>
 
       <section aria-label="Sources">

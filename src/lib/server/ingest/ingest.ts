@@ -26,6 +26,10 @@ export interface IngestResult {
   chunks: number;
 }
 
+export type IngestableKind = 'text' | 'pdf';
+
+export const SOURCE_KINDS: readonly IngestableKind[] = ['text', 'pdf'];
+
 const SOURCE_COLUMNS = 'id, notebook_id, kind, title, url, meta, created_at';
 
 function rowToSource(row: Record<string, InValue>): SourceRow {
@@ -46,8 +50,12 @@ function conflict(code: string, message: string): Error {
 
 export async function ingestTextSource(
   db: Client,
-  input: { notebookId: number; title?: string; text: string; userId?: number; url?: string }
+  input: { notebookId: number; title?: string; text: string; userId?: number; url?: string; kind?: IngestableKind }
 ): Promise<IngestResult> {
+  const kind: IngestableKind = input.kind ?? 'text';
+  if (!SOURCE_KINDS.includes(kind)) {
+    throw conflict('INVALID_KIND', `unsupported source kind ${String(input.kind)}`);
+  }
   const text = input.text.trim();
   if (text.length === 0) {
     throw conflict('INVALID_TEXT', 'source text must not be empty');
@@ -61,8 +69,8 @@ export async function ingestTextSource(
   const title = (input.title ?? '').trim() || 'Untitled source';
 
   const inserted = await db.execute({
-    sql: "INSERT INTO sources (notebook_id, kind, title, url, text) VALUES (?, 'text', ?, ?, ?)",
-    args: [input.notebookId, title, input.url ?? null, text]
+    sql: 'INSERT INTO sources (notebook_id, kind, title, url, text) VALUES (?, ?, ?, ?, ?)',
+    args: [input.notebookId, kind, title, input.url ?? null, text]
   });
   const sourceId = Number(inserted.lastInsertRowid!);
 
