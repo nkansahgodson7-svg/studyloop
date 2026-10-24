@@ -26,9 +26,9 @@ export interface IngestResult {
   chunks: number;
 }
 
-export type IngestableKind = 'text' | 'pdf';
+export type IngestableKind = 'text' | 'pdf' | 'youtube';
 
-export const SOURCE_KINDS: readonly IngestableKind[] = ['text', 'pdf'];
+export const SOURCE_KINDS: readonly IngestableKind[] = ['text', 'pdf', 'youtube'];
 
 const SOURCE_COLUMNS = 'id, notebook_id, kind, title, url, meta, created_at';
 

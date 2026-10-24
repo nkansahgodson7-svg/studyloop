@@ -52,7 +52,7 @@ describe('pdf kind through the text ingest core', () => {
         notebookId,
         title: 'Bot kind',
         text: PDF_TEXT,
-        kind: 'youtube' as never
+        kind: 'audio' as never
       })
     ).rejects.toMatchObject({ code: 'INVALID_KIND' });
   });

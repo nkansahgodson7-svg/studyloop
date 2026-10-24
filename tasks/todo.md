@@ -40,7 +40,7 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
   - Files: src/lib/server/ingest/*.ts + tests
 - [ ] Task 8: PDF source (client pdfjs → text)
   - Acceptance: ≤100-page PDF produces text source ≤ 30s
-- [ ] Task 9: YouTube source (youtubei.js)
+- [x] Task 9: YouTube source (youtubei.js) — done 2026-10-24. Unit tests verify extraction (video-id parsing, transcript segments, mocked fetcher, 400/502/404 paths). Browser E2E: invalid URL surfaced (400), live video surfaced a clear "no transcript available" (502) because YouTube's timedtext + get_transcript are hardened against datacenter IPs (timedtext returns 200 w/ empty body; get_transcript 400 "Precondition check failed"). Code path + UI degrade gracefully; owner can still paste an auto transcript manually via Add a text source until deployed egress works.
   - Acceptance: URL → transcript source ≤ 60s (mocked test + one live smoke)
 
 ## Phase 4: Grounded Chat

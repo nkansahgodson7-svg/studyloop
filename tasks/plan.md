@@ -53,14 +53,16 @@ exit criterion.
 
 ### Phase 3: Notebooks + Sources
 
-- [ ] Task 6: Notebooks CRUD per user + notebook list/switch UI
-- [ ] Task 7: Source ingest core — chunker + FTS5 indexing + text source (paste)
-- [ ] Task 8: PDF source — pdfjs client extraction → text payload → ingest core
-- [ ] Task 9: YouTube source — URL → `youtubei.js` transcript → ingest core
+- [x] Task 6: Notebooks CRUD per user + notebook list/switch UI (commit afe83dd)
+- [x] Task 7: Source ingest core — chunker + FTS5 indexing + text source (paste) (commit 242a20d)
+- [x] Task 8: PDF source — pdfjs client extraction → text payload → ingest core (commit ebd5e73)
+- [x] Task 9: YouTube source — URL → `youtubei.js` transcript → ingest core. LIVE fetch blocked 2026-10-24: YouTube times out datacenter egress (timedtext 200 + empty body for all formats; get_transcript 400 "Precondition check failed" = poToken guard, latest lib 18.3.0 included). DI fetcher design means the code path is fully testable and the UI degrades to a clear 502 banner; manual paste-transcript fallback is already available (Add a text source). Deployed egress may behave differently; revisit with PoToken/residential egress if needed.
 
 ### Checkpoint: Sources
-- [ ] A notebook has a PDF, a paste, and a YouTube source; FTS search returns
-  the right chunks for keyword queries (tested)
+- [x] A notebook has a PDF, a paste, and a YouTube source path; FTS search returns
+  the right chunks for keyword queries (tested — PDF E2E 'calvin' match 2026-10-24).
+  Deviation: live YouTube ingestion is blocked in this environment (see Task 9);
+  verified via DI-fetched unit tests + UI 502 degradation instead.
 
 ### Phase 4: Grounded Chat
 

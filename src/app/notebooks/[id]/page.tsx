@@ -21,9 +21,36 @@ export default function NotebookDetailPage({ params }: { params: Promise<{ id: s
   const [sources, setSources] = useState<SourceRow[] | null>(null);
   const [srcText, setSrcText] = useState('');
   const [srcTitle, setSrcTitle] = useState('');
+  const [ytUrl, setYtUrl] = useState('');
+  const [ytBusy, setYtBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pdfBusy, setPdfBusy] = useState(false);
+
+  async function handleYouTube(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setNotice(null);
+    setYtBusy(true);
+    try {
+      const res = await fetch(`/api/notebooks/${id}/sources/youtube`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: ytUrl })
+      });
+      if (res.status === 201) {
+        const body = (await res.json()) as { chunks: number; title: string };
+        setNotice(`Saved "${body.title}" — split into ${body.chunks} searchable chunk${body.chunks === 1 ? '' : 's'}.`);
+        setYtUrl('');
+        await load();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setError(body?.error ?? `YouTube save failed (${res.status})`);
+    } finally {
+      setYtBusy(false);
+    }
+  }
 
   async function handlePdf(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -174,6 +201,21 @@ export default function NotebookDetailPage({ params }: { params: Promise<{ id: s
           />
         </form>
         {pdfBusy ? <p role="status" aria-busy="true">Extracting PDF…</p> : null}
+
+        <form aria-label="Add a YouTube source" onSubmit={handleYouTube}>
+          <label htmlFor="yt-url">YouTube URL (transcript is fetched server-side)</label>
+          <input
+            id="yt-url"
+            type="url"
+            required
+            value={ytUrl}
+            onChange={(e) => setYtUrl(e.target.value)}
+            placeholder="https://www.youtube.com/watch?v=…"
+          />
+          <button type="submit" disabled={ytBusy}>
+            {ytBusy ? 'Fetching transcript…' : 'Add YouTube transcript'}
+          </button>
+        </form>
       </section>
 
       <section aria-label="Sources">
