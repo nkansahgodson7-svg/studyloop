@@ -113,6 +113,32 @@ export async function revokeSession(db: Client, token: string): Promise<void> {
   await db.execute({ sql: 'DELETE FROM sessions WHERE token = ?', args: [token] });
 }
 
-export async function disableUser(db: Client, userId: number, disabled: boolean): Promise<void> {
-  await db.execute({ sql: 'UPDATE users SET disabled = ? WHERE id = ?', args: [disabled ? 1 : 0, userId] });
+export interface AdminUserRow {
+  id: number;
+  email: string;
+  role: UserRole;
+  disabled: boolean;
+  createdAt: string;
 }
+
+export async function listUsers(db: Client): Promise<AdminUserRow[]> {
+  const result = await db.execute({
+    sql: 'SELECT id, email, role, disabled, created_at FROM users ORDER BY created_at, id',
+    args: []
+  });
+  return result.rows.map((row) => ({
+    id: Number(row['id']),
+    email: String(row['email']),
+    role: row['role'] === 'admin' ? 'admin' : 'user',
+    disabled: Number(row['disabled']) === 1,
+    createdAt: String(row['created_at'])
+  }));
+}
+
+export async function setUserDisabled(db: Client, userId: number, disabled: boolean): Promise<void> {
+  await db.execute({ sql: 'UPDATE users SET disabled = ? WHERE id = ?', args: [disabled ? 1 : 0, userId] });
+  if (disabled) {
+    await revokeAllSessionsForUser(db, userId);
+  }
+}
+

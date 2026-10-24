@@ -8,7 +8,7 @@ import { applySchema, makeLocalDb } from '@/lib/db';
 import {
   createSession,
   createUser,
-  disableUser,
+  setUserDisabled,
   findEnabledUserByEmail,
   findUserBySession,
   revokeAllSessionsForUser
@@ -67,11 +67,11 @@ describe('users + sessions data layer', () => {
     const owner = await seedUser(db, 'disable.user@test.local');
     const token = await createSession(db, owner.id);
 
-    await disableUser(db, owner.id, true);
+    await setUserDisabled(db, owner.id, true);
     expect(await findUserBySession(db, token, new Date())).toBeNull();
     expect(await findEnabledUserByEmail(db, 'disable.user@test.local')).toBeNull();
 
-    await disableUser(db, owner.id, false);
+    await setUserDisabled(db, owner.id, false);
     expect(await findEnabledUserByEmail(db, 'disable.user@test.local')).not.toBeNull();
 
     await revokeAllSessionsForUser(db, owner.id);
