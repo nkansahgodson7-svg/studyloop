@@ -66,14 +66,21 @@ exit criterion.
 
 ### Phase 4: Grounded Chat
 
-- [ ] Task 10: Retrieval + Groq stream route — FTS top-k → cited prompt build →
-  `/api/notebooks/:id/chat` SSE stream; refusal contract when retrieval is empty
-- [ ] Task 11: Chat UI — streaming message list, citation chips, error/rate-limit
-  states; messages persisted with citations
+- [x] Task 10: Retrieval + Groq stream route — FTS top-k → cited prompt build →
+  `/api/notebooks/:id/chat` SSE stream; refusal contract when retrieval is empty (commit f4426d7)
+- [x] Task 11: Chat UI — streaming message list, citation chips, error/rate-limit
+  states; messages persisted with citations (commit edc3018). Fix found live: FTS sentence
+  queries returned nothing (implicit AND) → OR of quoted terms.
 
 ### Checkpoint: Chat
-- [ ] Ask about uploaded content → answer with citation; ask about something not
-  in sources → explicit refusal (mocked-model test + manual check)
+- [x] Ask about uploaded content → answer with citation — LIVE 2026-10-24 with the
+  owner's BYO key: "What is photosynthesis and where does the Calvin cycle take place?"
+  streamed with inline [1][2] citations and chip list ([1] fixture.pdf, [2] Lecture 4,
+  [3-5] CSM 152 PDF). Default model switched to openai/gpt-oss-20b (llama-3.3-70b
+  decommissioned on Groq — commit 9768074).
+- [x] Ask about something not in sources → explicit refusal — live (mitochondria ask
+  over real notebook data) + mocked-model test for the deterministic refusal (97 tests,
+  console clean, error/503 states verified live).
 
 ### Phase 5: Review Loop (flashcards)
 

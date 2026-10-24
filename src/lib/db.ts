@@ -51,10 +51,6 @@ export function getDb(): Client {
   return client;
 }
 
-export async function applySchema(db: Client): Promise<void> {
-  await db.executeMultiple(SCHEMA);
-}
-
 const SCHEMA = `
 PRAGMA foreign_keys = ON;
 
@@ -140,7 +136,8 @@ CREATE TABLE IF NOT EXISTS reviews (
   reps INTEGER NOT NULL DEFAULT 0,
   lapses INTEGER NOT NULL DEFAULT 0,
   state INTEGER NOT NULL DEFAULT 0,
-  last_graded TEXT
+  last_graded TEXT,
+  fsrs_meta TEXT
 );
 
 CREATE TABLE IF NOT EXISTS quiz_items (
@@ -167,4 +164,21 @@ CREATE INDEX IF NOT EXISTS idx_chat_notebook ON chat_messages(notebook_id, id);
 CREATE INDEX IF NOT EXISTS idx_cards_notebook ON cards(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_quiz_notebook ON quiz_items(notebook_id);
+
+CREATE TABLE IF NOT EXISTS review_log (
+  id INTEGER PRIMARY KEY,
+  card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+  rating INTEGER NOT NULL,
+  graded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 `;
+
+export async function applySchema(db: Client): Promise<void> {
+  await db.executeMultiple(SCHEMA);
+  // Column added after table creation: pre-existing databases get it best-effort.
+  try {
+    await db.execute('ALTER TABLE reviews ADD COLUMN fsrs_meta TEXT');
+  } catch {
+    // column already exists
+  }
+}
