@@ -1,12 +1,37 @@
 import type { Client, Config } from '@libsql/client';
 import { createClient } from '@libsql/client';
+import { mkdirSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+
+function isLocalFileUrl(url: string): boolean {
+  return url.startsWith('file:');
+}
+
+function fileUrlToPath(url: string): string {
+  return url.slice('file:'.length);
+}
+
+/**
+ * SQLite error 14 (CANTOPEN): `file:` targets do not create parent
+ * directories, so do it up front. Accepts a `file:` URL or a plain path;
+ * relative paths resolve against the process cwd.
+ */
+export function ensureLocalDir(fileUrl: string): void {
+  const raw = fileUrl.startsWith('file:') ? fileUrlToPath(fileUrl) : fileUrl;
+  if (raw === ':memory:') {
+    return;
+  }
+  mkdirSync(dirname(resolve(raw)), { recursive: true });
+}
 
 function localUrl(path: string): string {
   return `file:${path}`;
 }
 
 export function makeLocalDb(filePath: string): Client {
-  return createClient({ url: localUrl(filePath) });
+  const url = localUrl(filePath);
+  ensureLocalDir(url);
+  return createClient({ url });
 }
 
 let client: Client | null = null;
@@ -14,8 +39,11 @@ let client: Client | null = null;
 export function getDb(): Client {
   if (!client) {
     const url = process.env.TURSO_DATABASE_URL ?? localUrl('data/studyloop.db');
+    if (isLocalFileUrl(url)) {
+      ensureLocalDir(url);
+    }
     const config: Config = { url };
-    if (url.startsWith('libsql') || url.startsWith('wss')) {
+    if (!isLocalFileUrl(url)) {
       config.authToken = process.env.TURSO_AUTH_TOKEN;
     }
     client = createClient(config);

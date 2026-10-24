@@ -1,8 +1,27 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applySchema, makeLocalDb } from './db';
+import { applySchema, ensureLocalDir, makeLocalDb } from './db';
+
+describe('db: local file setup', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'studyloop-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('creates the parent directory of a missing local database path', async () => {
+    const nested = join(dir, 'does-not-exist-yet', 'studyloop.db');
+    await ensureLocalDir(nested);
+    const info = await stat(join(dir, 'does-not-exist-yet'));
+    expect(info.isDirectory()).toBe(true);
+  });
+});
 
 describe('db: schema + FTS', () => {
   let dir: string;
