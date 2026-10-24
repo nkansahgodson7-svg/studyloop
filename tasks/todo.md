@@ -50,7 +50,7 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
 
 ## Phase 5: Review Loop
 
-- [ ] Task 12: FSRS wrapper + cards/reviews repo + card generation (≤10/call) + manual CRUD
+- [x] Task 12: FSRS wrapper + cards/reviews repo + card generation (≤10/call) + manual CRUD — done 2026-10-24 (commit 05ffe98). Fixture tests for due dates/lapses/streak; generation is one batched completion w/ malformed-retry (deviation, see plan.md); routes under /api/notebooks/[id]/cards* + /api/cards/[id]*.
   - Acceptance: fixture tests for due dates; generation produces editable cards
 - [ ] Task 13: Review UI — Today queue, 4-button grading, streak, card editor
   - Acceptance: grading schedules next due; queue exact per user; streak increments

@@ -84,8 +84,13 @@ exit criterion.
 
 ### Phase 5: Review Loop (flashcards)
 
-- [ ] Task 12: Cards + FSRS — `fsrs.ts` wrapper, cards/reviews schema+repo,
-  generate-from-selection (streamed, ≤ 10/call), manual add/edit
+- [x] Task 12: Cards + FSRS — `fsrs.ts` wrapper, cards/reviews schema+repo,
+  generate-from-selection (≤ 10/call), manual add/edit + grade routes — done
+  2026-10-24 (commit 05ffe98; 119 tests). Deviation: generation is a single
+  batched completion (NOT streamed) with one malformed-JSON retry → 502
+  GENERATION_INVALID; default model openai/gpt-oss-20b. `reviews` got
+  `fsrs_meta TEXT` (exact TS-FSRS state round-trip) + `review_log` streak
+  ledger; `applySchema` is explicit (tests/seed call it; getDb() does not).
 - [ ] Task 13: Review UI — Today due queue, 4-button grading, streak counter,
   card editor
 
