@@ -57,7 +57,7 @@ export async function* groqDeltas(apiKey: string, system: string, question: stri
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: process.env.GROQ_MODEL ?? 'llama-3.3-70b-versatile',
+      model: process.env.GROQ_MODEL ?? 'openai/gpt-oss-20b',
       stream: true,
       temperature: 0.2,
       max_tokens: 800,
