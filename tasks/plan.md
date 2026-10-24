@@ -38,15 +38,18 @@ exit criterion.
 
 ### Phase 2: Accounts (vertical slice)
 
-- [ ] Task 3: Login/logout — `/login` page + `/api/auth/login,logout,me` +
+- [x] Task 3: Login/logout — `/login` page + `/api/auth/login,logout,me` +
   `requireUser`/`requireAdmin` guards; `npm run seed:admin` bootstrap script
-- [ ] Task 4: Admin user management — create user, disable/enable user (API +
+- [x] Task 4: Admin user management — create user, disable/enable user (API +
   minimal admin page); disabled users rejected at login
-- [ ] Task 5: BYO-key settings — save/clear personal Groq key (encrypted at rest)
+- [x] Task 5: BYO-key settings — save/clear personal Groq key (encrypted at rest)
 
 ### Checkpoint: Accounts
-- [ ] End-to-end: seed admin → login → create friend account → friend logs in →
+- [x] End-to-end: seed admin → login → create friend account → friend logs in →
   admin disables friend → friend logged out & cannot log back in
+  (verified live in browser 2026-10-24: isolated-context friend session 401 after
+  disable + login 403 "account disabled"; BYO key save/remove verified, DB stores
+  `v1$` ciphertext with no plaintext)
 
 ### Phase 3: Notebooks + Sources
 

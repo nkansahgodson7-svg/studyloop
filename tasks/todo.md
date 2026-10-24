@@ -17,15 +17,15 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
 
 ## Phase 2: Accounts
 
-- [ ] Task 3: Login/logout + guards + `seed:admin` script
+- [x] Task 3: Login/logout + guards + `seed:admin` script
   - Acceptance: seeded admin can log in; wrong password 401; disabled 403; guards reject unauthenticated API calls (tests)
   - Files: src/app/login/page.tsx, src/app/api/auth/*, src/lib/server/seed-admin.ts
   - Deps: Task 2
-- [ ] Task 4: Admin user management (create/disable)
+- [x] Task 4: Admin user management (create/disable)
   - Acceptance: admin-only route returns 403 for non-admin; disabled user's sessions purged, login blocked
   - Files: src/app/admin/page.tsx, src/app/api/admin/users/* + tests
   - Deps: Task 3
-- [ ] Task 5: BYO-key settings (save/clear, encrypted)
+- [x] Task 5: BYO-key settings (save/clear, encrypted)
   - Acceptance: saved key decrypts server-side; never returned by any API response
   - Files: src/app/settings/page.tsx, src/app/api/me/key/* + tests
   - Deps: Task 3
