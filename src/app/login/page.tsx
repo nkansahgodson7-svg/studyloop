@@ -21,7 +21,7 @@ export default function LoginPage() {
         body: JSON.stringify({ email, password })
       });
       if (res.ok) {
-        router.replace('/');
+        router.replace('/notebooks');
         router.refresh();
         return;
       }
