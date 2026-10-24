@@ -66,6 +66,15 @@ export async function findEnabledUserByEmail(db: Client, email: string): Promise
   return row ? rowToUser(row) : null;
 }
 
+export async function findUserByEmail(db: Client, email: string): Promise<UserRow | null> {
+  const result = await db.execute({
+    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, created_at FROM users WHERE email = ?',
+    args: [email.toLowerCase()]
+  });
+  const row = result.rows[0];
+  return row ? rowToUser(row) : null;
+}
+
 export async function createSession(db: Client, userId: number): Promise<string> {
   const token = sessionToken();
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 3600e3).toISOString();

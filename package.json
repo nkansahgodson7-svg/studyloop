@@ -14,7 +14,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
-    "gate": "npm test && npm run typecheck && npm run lint && npm run build"
+    "gate": "npm test && npm run typecheck && npm run lint && npm run build",
+    "seed:admin": "tsx src/lib/server/seed-admin.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.15.0",
@@ -33,7 +34,7 @@
     "@types/react-dom": "^19.1.0",
     "jsdom": "^26.1.0",
     "oxlint": "^1.0.0",
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.15",
     "typescript": "^5.8.0",
     "vite-tsconfig-paths": "^5.1.0",
     "vitest": "^3.1.0"
