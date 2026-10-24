@@ -45,9 +45,8 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
 
 ## Phase 4: Grounded Chat
 
-- [ ] Task 10: Retrieval + streaming chat route with citations + refusal contract
-  - Acceptance: cited answer for supported Q; explicit refusal when no chunks (mocked tests); rate-limit → readable error
-- [ ] Task 11: Chat UI (streaming list, citation chips, persistence)
+- [x] Task 10: Retrieval + streaming chat route with citations + refusal contract — done 2026-10-24 (commit f4426d7). Mocked-model tests cover the cited path, deterministic refusal, 503 no-key, 400/404.
+- [x] Task 11: Chat UI (streaming list, citation chips, persistence) — done (commit edc3018). Live fix: FTS OR-query change. Live E2E with the owner's BYO Groq key streamed a cited answer; refusal verified live; model default set to openai/gpt-oss-20b (9768074).
 
 ## Phase 5: Review Loop
 
