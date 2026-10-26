@@ -149,12 +149,18 @@ export async function youtubeSourceCreate(
     }
 
     const fetched = await timedFetchTranscript(videoId, fetchTranscript);
+    const lastStartMs = fetched.segments.reduce((max, segment) => Math.max(max, segment.startMs), 0);
+    const durationMin = Math.max(1, Math.round(lastStartMs / 60_000));
     const result = await ingestTextSource(db, {
       notebookId,
       title: fetched.title,
       text: parseTranscriptText(fetched.segments),
       url,
       kind: 'youtube'
+    });
+    await db.execute({
+      sql: 'UPDATE sources SET meta = ? WHERE id = ?',
+      args: [`${durationMin} min · ${result.chunks} chunks`, result.id]
     });
     return NextResponse.json(result, { status: 201 });
   } catch (error) {

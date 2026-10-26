@@ -30,7 +30,7 @@ export async function textSourceCreate(db: Client, req: Request, idRaw: string):
     } catch {
       return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
     }
-    const body = parsedBody as { title?: unknown; text?: unknown; kind?: unknown };
+    const body = parsedBody as { title?: unknown; text?: unknown; kind?: unknown; pageCount?: unknown };
     if (typeof body.text !== 'string') {
       return NextResponse.json({ error: 'text required' }, { status: 400 });
     }
@@ -42,8 +42,15 @@ export async function textSourceCreate(db: Client, req: Request, idRaw: string):
     }
     const title = typeof body.title === 'string' ? body.title : undefined;
     const kind = body.kind as IngestableKind | undefined;
+    const pageCount = typeof body.pageCount === 'number' && Number.isInteger(body.pageCount) && body.pageCount > 0 ? body.pageCount : null;
 
     const result = await ingestTextSource(db, { notebookId, userId: user.id, title, text: body.text, kind });
+    if (kind === 'pdf' && pageCount) {
+      await db.execute({
+        sql: 'UPDATE sources SET meta = ? WHERE id = ?',
+        args: [`${pageCount} pages · ${result.chunks} chunks`, result.id]
+      });
+    }
     return NextResponse.json(result, { status: 201 });
   } catch (error) {
     if ((error as CodedError).code) {

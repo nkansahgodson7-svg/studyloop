@@ -50,7 +50,7 @@ function conflict(code: string, message: string): Error {
 
 export async function ingestTextSource(
   db: Client,
-  input: { notebookId: number; title?: string; text: string; userId?: number; url?: string; kind?: IngestableKind }
+  input: { notebookId: number; title?: string; text: string; userId?: number; url?: string; kind?: IngestableKind; meta?: string }
 ): Promise<IngestResult> {
   const kind: IngestableKind = input.kind ?? 'text';
   if (!SOURCE_KINDS.includes(kind)) {
@@ -79,6 +79,18 @@ export async function ingestTextSource(
     await db.execute({
       sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, ?, ?)',
       args: [sourceId, ord, chunks[ord]!]
+    });
+  }
+
+  if (input.meta) {
+    await db.execute({
+      sql: 'UPDATE sources SET meta = ? WHERE id = ?',
+      args: [input.meta, sourceId]
+    });
+  } else {
+    await db.execute({
+      sql: 'UPDATE sources SET meta = ? WHERE id = ?',
+      args: [`${chunks.length} chunks`, sourceId]
     });
   }
 

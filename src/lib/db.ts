@@ -181,4 +181,9 @@ export async function applySchema(db: Client): Promise<void> {
   } catch {
     // column already exists
   }
+  try {
+    await db.execute('ALTER TABLE cards ADD COLUMN generated_at TEXT');
+  } catch {
+    // column already exists
+  }
 }

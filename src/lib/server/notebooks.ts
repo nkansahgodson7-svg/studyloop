@@ -105,7 +105,21 @@ export async function notebooksDelete(db: Client, req: Request, idRaw: string): 
     if (!deleted) {
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
     }
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ deleted: true });
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function notebooksDetail(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  try {
+    const user = await requireUser(db, req);
+    const id = Number(idRaw);
+    const notebook = Number.isInteger(id) ? await ownNotebook(db, user.id, id) : null;
+    if (!notebook) {
+      return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+    return NextResponse.json(notebook);
   } catch (error) {
     return errorResponse(error);
   }

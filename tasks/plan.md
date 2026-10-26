@@ -116,6 +116,93 @@ exit criterion.
 - [ ] All spec success criteria #1–#11 verified or explicitly waived with reason
 - [ ] Deployed URL works for admin + 1 friend account
 
+### Phase 8: Pixel-perfect UI (frontend/ mockup → real app)
+
+Goal: the real Next.js app becomes visually and interactionally indistinguishable
+from `frontend/` (the validated mockup; `design.md` is the design system). Real
+backend stays real; wherever the mockup simulates a behavior the backend can't do
+yet, the backend is built up to meet it ("prototype spec wins"). Confirmed intent:
+**visuals + motion + interactions on real data** (interview 2026-10-26).
+
+#### Architecture Decisions
+
+- **`frontend/styles.css` is ported near-verbatim into `globals.css`** (fonts
+  @import kept; it is what the mockup loads). Class names stay byte-identical —
+  pixel parity rides on the CSS, not on re-authored styles. No Tailwind, no CSS
+  modules, no inline styles (current inline-styled pages get replaced).
+- **Components adopt the mockup's exact DOM + class names.** New shared
+  components under `src/components/ui/` (Icon, Btn, Row, Ring, Segmented, Hero,
+  Sheet, Toast, …). Server components by default; client only for interaction.
+- **Screen transition system reproduces `app.js swap()`**: per-route `<template>`
+  entry animations (push-in / pop-in / fade-in classes) + a client snapshot
+  overlay that keeps the outgoing `.screen` visible for the 260–300 ms exit
+  animation (direction from a route-depth map: login 0 · tabs 1 · notebook 2 ·
+  session 3; equal depth fades like the mockup's tab switches).
+- **App chrome lives in the root layout**: `.frame` / `.shell` / `.view`,
+  tab bar (pathname-driven), `.toasts`, `.sheet-root`. Root `layout.tsx` gains the
+  mockup's metadata (viewport-fit=cover, theme-color, favicon, title map).
+- **Auth guard mirrors the mockup's redirect rule**: client guard shell fetches
+  `/api/auth/me`; unauthorized → `/login`, authorized on `/login` → `/`.
+- **URLs stay App-Router-native** (`/`, `/review`, `/library`, `/notebooks/[id]`,
+  `/review/session?key=…`, `/settings`) — the mockup's hash routes map onto them;
+  admin is untouched.
+- **Data flow mirrors `syncStateFromDB`**: per-notebook fetches for rows/counts,
+  one compact `/api/me/summary` for home/review aggregates, real SSE chat frames,
+  real FSRS grade POSTs, real AES-GCM BYO key flow. Mockup demo data (seed chat
+  answers, hardcoded suggestions) is *not* faked back in — generic suggestions
+  and honest empty/error/loading states instead.
+- **Swipe physics ported 1:1 from `setupSwipe`** (thresholds 72/86, axis lock
+  0.2× damp, tilt ±9°, progressive cue opacity + is-hot, fly-out commit ±1.15×
+  diagonal, 200 ms spring-back, keyboard Space/1–4/Esc).
+
+#### Vertical slices
+
+- [ ] P8-1: Design foundation — `globals.css` ← full mockup CSS; layout shell +
+  metadata + favicon; Icon set component
+- [ ] P8-2: Transition & chrome system — ScreenSection entry classes,
+  snapshot-overlay exits, TabBar, Toast provider, Sheet provider (scrim, focus
+  trap, ESC, restore focus)
+- [ ] P8-3: Auth surfaces — login screen port (demo account button → real login,
+  hint copy), guard redirect, auth-aware redirect targets
+- [ ] P8-4: Home "Today" — greeting, dark hero w/ mastery Ring + streak, rows,
+  due badges, new-notebook sheet, loading/empty states
+- [ ] P8-5: Library — rows, new notebook, honest empty state
+- [ ] P8-6: Review hub — dark due-total card, per-notebook due rows, practice
+  entry, scheduled footnote
+- [ ] P8-7: Notebook detail scaffold + Overview — topbar/back/menu sheet,
+  nb-hero, segmented tabs + tabpanel enter animation, summary card, source rows
+  (kind tone + meta), ai-note
+- [ ] P8-8: Add-source sheet — kind picker, PDF/text/YouTube fields, client PDF
+  extraction, processing states, error rows → POST endpoints
+- [ ] P8-9: Cards tab — AI generate button, source-select sheet, generating
+  skeleton, Study/Generated groups, due badges, sticky review CTA
+- [ ] P8-10: Chat tab — mockup DOM on real SSE (messages, typing dots, suggested
+  prompts, composer sticky bar, citation chips, scroll-to-bottom)
+- [ ] P8-11: Review session — fixed screen (progress header, flash reveal,
+  swipe physics, grade grid, keyboard), practice/empty/summary screens, real
+  grade POSTs + "next review in" toasts
+- [ ] P8-12: Settings — profile, AI key row + key sheet (PUT/DELETE me/key),
+  reset demo w/ confirm sheet, sign out
+- [ ] P8-13: Backend parity bits — `GET /api/me/summary` (streak, due counts,
+  mastery, reviewed-today); `cardsDue ?all=1` practice mode; source meta
+  (chunks) surfaced in list; `POST /api/me/reset-demo` (wipe + faithful demo
+  reseed incl. review states); demo account bootstrap
+- [ ] P8-14: Cross-screen audit — titles, back paths, reduced motion, 320–720 px,
+  200 % zoom, empty/error states everywhere, gate green
+- [ ] P8-15: Browser parity pass — side-by-side vs mockup at 390/720 px per
+  screen + motion walk (push/pop, sheet, swipe, toasts), drift fixes
+
+Fulfills existing Task 13's UI half (Review UI: queue, grading, streak); the
+card editor is dropped as not present in the mockup (protocol decision, not an
+omission).
+
+### Checkpoint: Pixel-perfect UI
+- [ ] Screen-by-screen visual parity vs mockup at 390 px (and 720 px framed) live in browser
+- [ ] Full primary flow on real data: login → today → notebook → add source →
+  generate → review → grade → summary → today
+- [ ] Motion parity: push/pop, tab fade, sheet, reveal, swipe grading, toasts, ring
+- [ ] Gate green (`npm test && npm run typecheck && npm run lint && npm run build`)
+
 ## Deferred (post-MVP)
 
 Audio/video features, personas, second provider fallback, admin usage

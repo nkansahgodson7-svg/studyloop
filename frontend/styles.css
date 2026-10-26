@@ -1042,6 +1042,10 @@ svg {
   padding-top: 16px;
 }
 
+.tabpanel--enter {
+  animation: fadeIn 0.18s var(--ease-out);
+}
+
 .source-row .row__tile {
   font-size: 0;
 }
@@ -1352,6 +1356,7 @@ svg {
 }
 
 .flash-wrap {
+  position: relative;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -1359,9 +1364,12 @@ svg {
   padding: 18px 20px;
   min-height: 0;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .flash {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   min-height: 320px;
   padding: 30px 24px;
@@ -1381,6 +1389,85 @@ svg {
 
 .flash:active {
   transform: scale(0.994);
+}
+
+.flash--swipe {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+  will-change: transform;
+}
+
+.flash--swipe:active {
+  transform: none;
+  cursor: grabbing;
+}
+
+.swipe-cues {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.swipe-cue {
+  position: absolute;
+  padding: 7px 13px;
+  border: 1.5px solid currentColor;
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  opacity: 0;
+  transform: scale(0.92);
+  transition: opacity 0.12s linear, transform 0.12s var(--ease-out);
+}
+
+.swipe-cue.is-hot {
+  transform: scale(1);
+}
+
+.swipe-cue--again {
+  left: 18px;
+  top: 50%;
+  margin-top: -15px;
+  color: #9c3b22;
+  background: var(--rose);
+  border-color: #e0b6a4;
+}
+
+.swipe-cue--good {
+  right: 18px;
+  top: 50%;
+  margin-top: -15px;
+  color: #14563e;
+  background: var(--sage);
+  border-color: #b8d2b0;
+}
+
+.swipe-cue--easy {
+  top: 16px;
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin-inline: auto;
+  color: #0b3527;
+  background: var(--brand-soft);
+  border-color: #b2cdb9;
+}
+
+.swipe-cue--hard {
+  bottom: 16px;
+  left: 0;
+  right: 0;
+  width: fit-content;
+  margin-inline: auto;
+  color: #6b5410;
+  background: var(--butter);
+  border-color: #e0cd8f;
 }
 
 .flash__prompt {

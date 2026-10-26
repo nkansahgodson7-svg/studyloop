@@ -17,6 +17,7 @@ export interface CardRow {
   front: string;
   back: string;
   createdAt: string;
+  generatedAt?: string | null;
 }
 
 export interface QueuedCard {
@@ -44,13 +45,13 @@ function rowToCard(row: Record<string, unknown>): CardRow {
 export async function createCard(
   db: Client,
   notebookId: number,
-  input: { sourceId?: number | null; front: string; back: string; createdAt?: Date }
+  input: { sourceId?: number | null; front: string; back: string; createdAt?: Date; generated?: boolean }
 ): Promise<CardRow> {
   const createdAt = input.createdAt ?? new Date();
   const createdAtIso = createdAt.toISOString();
   const result = await db.execute({
-    sql: 'INSERT INTO cards (notebook_id, source_id, front, back, created_at) VALUES (?, ?, ?, ?, ?)',
-    args: [notebookId, input.sourceId ?? null, input.front, input.back, createdAtIso]
+    sql: 'INSERT INTO cards (notebook_id, source_id, front, back, created_at, generated_at) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [notebookId, input.sourceId ?? null, input.front, input.back, createdAtIso, input.generated ? createdAtIso : null]
   });
   const cardId = Number(result.lastInsertRowid);
   const review = newReview(createdAt);
@@ -73,6 +74,36 @@ export async function listCards(db: Client, notebookId: number): Promise<CardRow
     args: [notebookId]
   });
   return result.rows.map(rowToCard);
+}
+
+interface CardWithReview extends CardRow {
+  due: string;
+  state: number;
+  stability: number;
+}
+
+export async function listCardsWithReview(db: Client, notebookId: number): Promise<CardWithReview[]> {
+  const result = await db.execute({
+    sql: `SELECT c.id, c.notebook_id, c.source_id, c.front, c.back, c.created_at, c.generated_at,
+                 r.due, r.state, r.stability
+          FROM cards c
+          JOIN reviews r ON r.card_id = c.id
+          WHERE c.notebook_id = ?
+          ORDER BY c.created_at DESC, c.id DESC`,
+    args: [notebookId]
+  });
+  return result.rows.map((row) => ({
+    id: Number(row.id),
+    notebookId: Number(row.notebook_id),
+    sourceId: row.source_id == null ? null : Number(row.source_id),
+    front: String(row.front),
+    back: String(row.back),
+    createdAt: String(row.created_at),
+    generatedAt: row.generated_at == null ? null : String(row.generated_at),
+    due: String(row.due),
+    state: Number(row.state),
+    stability: Number(row.stability)
+  }));
 }
 
 export async function cardOwned(db: Client, userId: number, cardId: number): Promise<CardRow | null> {
@@ -204,16 +235,7 @@ export async function gradeCard(
   };
 }
 
-export async function streakDays(db: Client, notebookId: number, now: Date): Promise<number> {
-  const result = await db.execute({
-    sql: `SELECT DISTINCT substr(r.graded_at, 1, 10) AS day FROM review_log r
-          JOIN cards c ON c.id = r.card_id
-          JOIN notebooks nb ON nb.id = c.notebook_id
-          WHERE nb.id = ? AND date(r.graded_at) <= date(?)
-          ORDER BY day DESC`,
-    args: [notebookId, now.toISOString()]
-  });
-  const days = result.rows.map((row) => String(row.day));
+export function streakFromDays(days: string[], now: Date): number {
   if (days.length === 0) {
     return 0;
   }
@@ -232,6 +254,26 @@ export async function streakDays(db: Client, notebookId: number, now: Date): Pro
     break;
   }
   return streak;
+}
+
+async function streakDaysFor(db: Client, where: string, arg: number, now: Date): Promise<number> {
+  const result = await db.execute({
+    sql: `SELECT DISTINCT substr(r.graded_at, 1, 10) AS day FROM review_log r
+          JOIN cards c ON c.id = r.card_id
+          JOIN notebooks nb ON nb.id = c.notebook_id
+          WHERE ${where} AND date(r.graded_at) <= date(?)
+          ORDER BY day DESC`,
+    args: [arg, now.toISOString()]
+  });
+  return streakFromDays(result.rows.map((row) => String(row.day)), now);
+}
+
+export async function streakDays(db: Client, notebookId: number, now: Date): Promise<number> {
+  return streakDaysFor(db, 'nb.id = ?', notebookId, now);
+}
+
+export async function streakDaysForUser(db: Client, userId: number, now: Date): Promise<number> {
+  return streakDaysFor(db, 'nb.user_id = ?', userId, now);
 }
 
 function validationError(code: string, message: string, status: number): Error {
@@ -351,7 +393,8 @@ export async function cardsGenerate(
       await createCard(db, notebookId, {
         sourceId: sourceId ?? null,
         front: card.front.slice(0, FRONT_MAX),
-        back: card.back.slice(0, BACK_MAX)
+        back: card.back.slice(0, BACK_MAX),
+        generated: true
       });
       created += 1;
     }
@@ -428,7 +471,7 @@ export async function cardsList(db: Client, req: Request, idRaw: string): Promis
     if (!notebook) {
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
     }
-    const cards = await listCards(db, notebookId);
+    const cards = await listCardsWithReview(db, notebookId);
     return NextResponse.json({ cards });
   } catch (error) {
     return errorResponse(error);

@@ -39,6 +39,24 @@ export async function seedAdmin(
   return { id: created.id, email: created.email, role: 'admin' };
 }
 
+export const DEMO_EMAIL = 'demo@studyloop.app';
+export const DEMO_PASSWORD = 'studyloop';
+
+export async function ensureDemoUser(
+  db: Client
+): Promise<{ id: number; email: string }> {
+  const existing = await findUserByEmail(db, DEMO_EMAIL);
+  if (existing) {
+    return { id: existing.id, email: existing.email };
+  }
+  const created = await createUser(db, {
+    email: DEMO_EMAIL,
+    passwordHash: await hashPassword(DEMO_PASSWORD),
+    role: 'user'
+  });
+  return { id: created.id, email: created.email };
+}
+
 function isMainModule(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -57,8 +75,10 @@ if (isMainModule()) {
       const db = getDb();
       await applySchema(db);
       const admin = await seedAdmin(db, { email, password });
+      await ensureDemoUser(db);
       await db.close();
       console.log(`admin ready: ${admin.email}`);
+      console.log("demo user ready: demo@studyloop.app");
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;

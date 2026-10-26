@@ -1,242 +1,434 @@
-'use client';
+"use client";
 
-import { use, useCallback, useEffect, useState, type FormEvent } from 'react';
-import Link from 'next/link';
-import { Chat } from '@/components/Chat';
+import { useCallback, useEffect, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { ScreenSection } from "@/components/ui/ScreenSection";
+import { Icon, TONES, plural } from "@/components/ui/icons";
+import { useSheet } from "@/components/ui/Sheet";
+import { useToast } from "@/components/ui/Toast";
+import { SheetFrame } from "@/components/ui/Sheet";
+import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
+import ChatPanel from "@/components/notebook/ChatPanel";
+import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
+import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
+import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 
-interface SourceRow {
-  id: number;
-  kind: 'pdf' | 'youtube' | 'text';
-  title: string;
-  url: string | null;
-  createdAt: string;
+type Tab = "overview" | "chat" | "cards";
+
+function sourceTone(kind: string): string {
+  return kind === "pdf" ? "tone-butter" : kind === "youtube" ? "tone-sky" : "tone-sage";
 }
 
-const MAX_PDF_BYTES = 40 * 1024 * 1024;
+function sourceGlyph(kind: string): string {
+  return kind === "pdf" ? "file" : kind === "youtube" ? "play" : "text";
+}
 
-type NotebookState = 'loading' | 'missing';
+function sourceLabel(kind: string): string {
+  return kind === "pdf" ? "PDF" : kind === "youtube" ? "YouTube" : "Note";
+}
 
-export default function NotebookDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const [notebooks, setNotebooks] = useState<Record<number, string> | NotebookState>('loading');
-  const [sources, setSources] = useState<SourceRow[] | null>(null);
-  const [srcText, setSrcText] = useState('');
-  const [srcTitle, setSrcTitle] = useState('');
-  const [ytUrl, setYtUrl] = useState('');
-  const [ytBusy, setYtBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [pdfBusy, setPdfBusy] = useState(false);
+function SourceRowView({ source }: { source: NotebookBundle["sources"][number] }) {
+  return (
+    <div className="row source-row">
+      <span className={`row__tile ${sourceTone(source.kind)}`}>
+        <Icon name={sourceGlyph(source.kind)} size={21} />
+      </span>
+      <span className="row__main">
+        <span className="row__title">{source.title}</span>
+        <span className="row__meta">
+          <span className="source-row__sub">
+            {sourceLabel(source.kind)}
+            {source.meta ? (
+              <>
+                <span className="dot" />
+                {source.meta}
+              </>
+            ) : null}
+          </span>
+        </span>
+      </span>
+    </div>
+  );
+}
 
-  async function handleYouTube(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setNotice(null);
-    setYtBusy(true);
-    try {
-      const res = await fetch(`/api/notebooks/${id}/sources/youtube`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ url: ytUrl })
-      });
-      if (res.status === 201) {
-        const body = (await res.json()) as { chunks: number; title: string };
-        setNotice(`Saved "${body.title}" — split into ${body.chunks} searchable chunk${body.chunks === 1 ? '' : 's'}.`);
-        setYtUrl('');
-        await load();
-        return;
+function CardRowView({ card }: { card: NotebookCard }) {
+  const due = new Date(card.due).getTime() - Date.now();
+  const state =
+    due <= 0
+      ? { text: "Due", cls: "" }
+      : due < 3600000
+        ? { text: `${Math.ceil(due / 60000)}m`, cls: "badge--neutral" }
+        : due < 86400000
+          ? { text: `${Math.round(due / 3600000)}h`, cls: "badge--neutral" }
+          : { text: `${Math.round(due / 86400000)}d`, cls: "badge--neutral" };
+  return (
+    <div className="card-row">
+      <div className="card-row__body">
+        <p className="card-row__front">{card.front}</p>
+        <p className="card-row__back">{card.back}</p>
+      </div>
+      <span className={`card-row__state badge ${state.cls}`}>{state.text}</span>
+    </div>
+  );
+}
+
+function CardsPanelView({
+  bundle,
+  generating,
+  onReview,
+  onPractice,
+  onGenerate
+}: {
+  bundle: NotebookBundle;
+  generating: boolean;
+  onReview: () => void;
+  onPractice: () => void;
+  onGenerate: () => void;
+}) {
+  const due = dueCount(bundle.cards);
+
+  return (
+    <div className="stack--16">
+      <div className="section-head" style={{ marginBottom: 0 }}>
+        <h2>Flashcards</h2>
+        <span className="badge badge--neutral">{plural(bundle.cards.length, "card")}</span>
+      </div>
+      <button className="btn btn--ai btn--block" type="button" disabled={generating} onClick={onGenerate}>
+        <Icon name="sparkle" size={17} className="i-sparkle" /> {generating ? "Reading sources…" : "Generate from sources"}
+      </button>
+      {generating ? (
+        <div className="processing">
+          <div className="processing__row">
+            <span className="spinner" /> Scanning {plural(bundle.sources.length, "source")} and drafting cards…
+          </div>
+          <div className="skeleton" style={{ height: 68 }} />
+          <div className="skeleton" style={{ height: 68 }} />
+          <div className="skeleton" style={{ height: 68 }} />
+        </div>
+      ) : null}
+      {!generating && bundle.cards.length === 0 ? (
+        <div className="empty">
+          <p className="h3">No cards yet</p>
+          <p className="small">Generate a first set from your sources, then review them daily.</p>
+        </div>
+      ) : null}
+      {!generating && bundle.cards.length > 0 ? (
+        <div className="stack--8">
+          {(() => {
+            const study = bundle.cards.filter((card) => !card.generatedAt);
+            const generated = bundle.cards.filter((card) => card.generatedAt);
+            const groups: Array<{ label: string; items: typeof study }> = [];
+            if (study.length) groups.push({ label: `Study cards · ${study.length}`, items: study });
+            if (generated.length) groups.push({ label: `Generated · ${generated.length}`, items: generated });
+            return groups.map((group) => (
+              <div className="stack--8" key={group.label}>
+                <h3 className="h4" style={{ marginTop: 6 }}>
+                  {group.label}
+                </h3>
+                {group.items.map((card) => (
+                  <CardRowView key={card.id} card={card} />
+                ))}
+              </div>
+            ));
+          })()}
+        </div>
+      ) : null}
+      <div style={{ position: "sticky", bottom: "calc(12px + env(safe-area-inset-bottom))", paddingTop: 6 }}>
+        <button className="btn btn--primary btn--block" type="button" onClick={due ? onReview : onPractice}>
+          {due ? `Review ${plural(due, "card")}` : "Practice all cards"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function NotebookScreen() {
+  const params = useParams<{ id: string }>();
+  const search = useSearchParams();
+  const router = useRouter();
+  const sheet = useSheet();
+  const { toast } = useToast();
+  const id = Number(params.id);
+  const [bundle, setBundle] = useState<NotebookBundle | null>(null);
+  const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
+  const [generating, setGenerating] = useState(false);
+
+  const reload = useCallback(
+    async (_silent = false) => {
+      if (!Number.isInteger(id)) return;
+      try {
+        const next = await loadNotebook(id);
+        setBundle(next);
+      } catch {
+        setBundle(null);
       }
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      setError(body?.error ?? `YouTube save failed (${res.status})`);
-    } finally {
-      setYtBusy(false);
-    }
-  }
-
-  async function handlePdf(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = '';
-    if (!file) return;
-    setError(null);
-    setNotice(null);
-
-    if (file.size > MAX_PDF_BYTES) {
-      setError('PDF is larger than 40 MB.');
-      return;
-    }
-    setPdfBusy(true);
-    try {
-      const { extractPdfText } = await import('@/lib/pdf/extract');
-      const { pageCount, text } = await extractPdfText(await file.arrayBuffer());
-      if (text.length < 20) {
-        setError('PDF had no extractable text (is it scanned images?).');
-        return;
-      }
-      const res = await fetch(`/api/notebooks/${id}/sources`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title: file.name, text, kind: 'pdf' })
-      });
-      if (res.status === 201) {
-        const body = (await res.json()) as { chunks: number };
-        setNotice(`Saved PDF (${pageCount} pages) — split into ${body.chunks} searchable chunk${body.chunks === 1 ? '' : 's'}.`);
-        await load();
-        return;
-      }
-      const body = (await res.json().catch(() => null)) as { error?: string } | null;
-      setError(body?.error ?? `PDF save failed (${res.status})`);
-    } catch (extractError) {
-      setError(extractError instanceof Error ? extractError.message : 'PDF extraction failed');
-    } finally {
-      setPdfBusy(false);
-    }
-  }
-
-  const load = useCallback(async () => {
-    const listRes = await fetch('/api/notebooks');
-    if (listRes.status === 401 || listRes.status === 403) {
-      setNotebooks('missing');
-      return;
-    }
-    if (listRes.ok) {
-      const all = (await listRes.json()) as { id: number; title: string }[];
-      if (!all.some((nb) => nb.id === Number(id))) {
-        setNotebooks('missing');
-        return;
-      }
-      const titleMap: Record<number, string> = {};
-      for (const nb of all) {
-        titleMap[nb.id] = nb.title;
-      }
-      setNotebooks(titleMap);
-
-      const srcRes = await fetch(`/api/notebooks/${id}/sources`);
-      if (srcRes.ok) {
-        setSources((await srcRes.json()) as SourceRow[]);
-      }
-    }
-  }, [id]);
+    },
+    [id]
+  );
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    void reload();
+  }, [id, reload]);
 
-  async function handleAddSource(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setNotice(null);
-    const res = await fetch(`/api/notebooks/${id}/sources`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: srcTitle, text: srcText })
-    });
-    if (res.status === 201) {
-      const body = (await res.json()) as { chunks: number };
-      setNotice(`Saved source — split into ${body.chunks} searchable chunk${body.chunks === 1 ? '' : 's'}.`);
-      setSrcText('');
-      setSrcTitle('');
-      await load();
-      return;
-    }
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    setError(body?.error ?? `Save failed (${res.status})`);
+  function openAddSource() {
+    if (!bundle) return;
+    sheet.open(<AddSourceSheetContent notebookId={id} notebookTitle={bundle.title} onSuccess={() => {
+      sheet.close();
+      toast("Source added");
+      void reload(true);
+    }} />);
   }
 
-  if (notebooks === 'missing') {
-    return (
-      <main>
-        <h1>Not found</h1>
-        <p>
-          <Link href="/notebooks">Back to notebooks</Link>
-        </p>
-      </main>
+  function openMenu() {
+    if (!bundle) return;
+    sheet.open(
+      <NotebookMenuSheet
+        deps={{
+          title: bundle.title,
+          dueCount: dueCount(bundle.cards),
+          onAddSource: openAddSource,
+          onGenerate: handleGenerate,
+          onStartReview: startReview,
+          onDelete: confirmDelete
+        }}
+      />
     );
   }
 
-  const headingText = notebooks === 'loading' ? 'Loading…' : notebooks[Number(id)];
+  function confirmDelete() {
+    sheet.open(
+      <SheetFrame
+        title="Delete notebook"
+        sub={bundle?.title ?? ""}
+        body={
+          <p className="small text-pretty" style={{ color: "var(--ink-2)" }}>
+            This removes its sources, chat history, and flashcards. It cannot be undone.
+          </p>
+        }
+        foot={
+          <button className="btn btn--danger btn--block" type="button" onClick={() => void performDelete()}>
+            Delete notebook
+          </button>
+        }
+      />
+    );
+  }
+
+  async function performDelete() {
+    try {
+      const res = await fetch(`/api/notebooks/${id}`, { method: "DELETE" });
+      if (res.ok || res.status === 404) {
+        sheet.close();
+        toast("Notebook deleted");
+        router.push("/library");
+      } else {
+        sheet.close();
+        toast("Could not delete notebook");
+      }
+    } catch {
+      sheet.close();
+      toast("Could not delete notebook");
+    }
+  }
+
+  function startReview() {
+    router.push(`/review/session?notebook=${id}`);
+  }
+
+  function handleGenerate() {
+    if (generating) return;
+    if (!bundle) return;
+    if (bundle.sources.length === 0) {
+      toast("No new cards in these sources");
+      return;
+    }
+    sheet.open(
+      <GenerateCardsSheetContent
+        sources={bundle.sources}
+        onConfirm={(sourceIds) => {
+          setGenerating(true);
+          sheet.close();
+          setTab("cards");
+          void runGeneration(sourceIds);
+        }}
+      />
+    );
+  }
+
+  async function runGeneration(sourceIds: number[]) {
+    setGenerating(true);
+    try {
+      let createdTotal = 0;
+      let lastError = "";
+      for (const sourceId of sourceIds) {
+        const res = await fetch(`/api/notebooks/${id}/cards/generate`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ sourceId })
+        });
+        const body = (await res.json().catch(() => null)) as { error?: string; created?: number } | null;
+        if (res.ok && typeof body?.created === "number") {
+          createdTotal += body.created;
+        } else if (body?.error) {
+          lastError = body.error;
+        }
+      }
+      if (createdTotal === 0) {
+        toast(lastError || "No new cards in these sources");
+      } else {
+        await reload(true);
+        toast("Cards generated");
+      }
+    } catch {
+      toast("Cards could not be generated");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  if (!bundle) {
+    return (
+      <ScreenSection>
+        <div className="topbar">
+          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+            <Icon name="back" />
+          </button>
+        </div>
+        <div className="px">
+          <div className="empty">
+            <p className="h3">Notebook not found</p>
+            <p className="small">It may have been deleted. Head back to your library.</p>
+            <a className="btn btn--primary btn--sm" href="/library">
+              Open library
+            </a>
+          </div>
+        </div>
+      </ScreenSection>
+    );
+  }
+
+  const due = dueCount(bundle.cards);
+  const tone = TONES[id % TONES.length];
+  const tabs: Array<[Tab, string]> = [
+    ["overview", "Overview"],
+    ["chat", "Chat"],
+    ["cards", "Cards"]
+  ];
 
   return (
-    <main>
-      <h1>
-        <Link href="/notebooks">Notebooks</Link> / {headingText}
-      </h1>
-      {error ? <p role="alert">{error}</p> : null}
-      {notice ? <p role="status">{notice}</p> : null}
+    <ScreenSection>
+      <div className="topbar">
+        <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <Icon name="back" />
+        </button>
+        <span className="topbar__title grow">{bundle.title}</span>
+        <button className="icon-btn" type="button" onClick={openMenu} aria-label="Notebook options">
+          <Icon name="dots" size={20} className="i-dots" />
+        </button>
+      </div>
 
-      <section aria-label="Add a text source">
-        <h2>Add a text source</h2>
-        <form onSubmit={handleAddSource}>
-          <label htmlFor="src-title">Title</label>
-          <input
-            id="src-title"
-            type="text"
-            value={srcTitle}
-            onChange={(e) => setSrcTitle(e.target.value)}
-            placeholder="Lecture notes"
-          />
-          <label htmlFor="src-text">Paste text</label>
-          <textarea
-            id="src-text"
-            required
-            rows={8}
-            value={srcText}
-            onChange={(e) => setSrcText(e.target.value)}
-            placeholder="Paste any study material here"
-          />
-          <button type="submit">Save source</button>
-        </form>
+      <div className="nb-hero">
+        <span className={`nb-hero__badge ${tone}`} aria-hidden="true">
+          {(bundle.title.charAt(0) || "N").toUpperCase()}
+        </span>
+        <div className="nb-hero__main">
+          <h1 className="nb-hero__title">{bundle.title}</h1>
+          <p className="nb-hero__meta">
+            {plural(bundle.sources.length, "source")} · {plural(bundle.cards.length, "card")}
+            {due ? ` · ${due} due` : ""}
+          </p>
+        </div>
+      </div>
 
-        <form
-          aria-label="Add a PDF source"
-          onSubmit={(e) => {
-            e.preventDefault();
-          }}
-        >
-          <label htmlFor="pdf-file">Upload PDF (up to 100 pages, 40 MB)</label>
-          <input
-            id="pdf-file"
-            type="file"
-            accept="application/pdf,.pdf"
-            onChange={(e) => void handlePdf(e)}
-            disabled={pdfBusy}
-          />
-        </form>
-        {pdfBusy ? <p role="status" aria-busy="true">Extracting PDF…</p> : null}
+      <div className="px">
+        <div className="segmented" role="tablist" aria-label="Notebook sections">
+          {tabs.map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              className={tab === value ? "is-active" : ""}
+              onClick={() => setTab(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        <form aria-label="Add a YouTube source" onSubmit={handleYouTube}>
-          <label htmlFor="yt-url">YouTube URL (transcript is fetched server-side)</label>
-          <input
-            id="yt-url"
-            type="url"
-            required
-            value={ytUrl}
-            onChange={(e) => setYtUrl(e.target.value)}
-            placeholder="https://www.youtube.com/watch?v=…"
-          />
-          <button type="submit" disabled={ytBusy}>
-            {ytBusy ? 'Fetching transcript…' : 'Add YouTube transcript'}
-          </button>
-        </form>
-      </section>
-
-      <section aria-label="Sources">
-        <h2>Sources</h2>
-        {sources === null ? (
-          <p>Loading…</p>
-        ) : sources.length === 0 ? (
-          <p>No sources yet — paste text above.</p>
+      <div className="tabpanel px">
+        {tab === "overview" ? (
+          <OverviewPanelView bundle={bundle} due={due} onAdd={openAddSource} onReview={startReview} />
+        ) : tab === "chat" ? (
+          <ChatPanel bundle={bundle} notebookId={id} />
         ) : (
-          <ul>
-            {sources.map((source) => (
-              <li key={source.id}>
-                [{source.kind}] {source.title}
-              </li>
+          <CardsPanelView
+            bundle={bundle}
+            generating={generating}
+            onReview={startReview}
+            onPractice={() => router.push(`/review/session?notebook=${id}&practice=1`)}
+            onGenerate={handleGenerate}
+          />
+        )}
+      </div>
+    </ScreenSection>
+  );
+}
+
+function OverviewPanelView({
+  bundle,
+  due,
+  onAdd,
+  onReview
+}: {
+  bundle: NotebookBundle;
+  due: number;
+  onAdd: () => void;
+  onReview: () => void;
+}) {
+  return (
+    <div className="stack--16">
+      <div className="card card--flat spread">
+        <div>
+          <p className="h3">{due ? `${plural(due, "card")} due` : "No cards due"}</p>
+          <p className="small muted">
+            {plural(bundle.cards.length, "card")} in this notebook · {plural(bundle.sources.length, "source")}
+          </p>
+        </div>
+        <button className={`btn btn--sm ${due ? "btn--primary" : "btn--secondary"}`} type="button" onClick={onReview}>
+          {due ? "Review" : "Practice"}
+        </button>
+      </div>
+
+      <section>
+        <div className="section-head">
+          <h2>Sources</h2>
+          <button className="btn btn--sm btn--secondary" type="button" onClick={onAdd}>
+            <Icon name="plus" size={15} /> Add
+          </button>
+        </div>
+        {bundle.sources.length ? (
+          <div className="rows">
+            {bundle.sources.map((source) => (
+              <SourceRowView key={source.id} source={source} />
             ))}
-          </ul>
+          </div>
+        ) : (
+          <div className="empty">
+            <p className="h3">No sources yet</p>
+            <p className="small">Add a PDF, paste your notes, or link a lecture.</p>
+            <button className="btn btn--secondary btn--sm" type="button" onClick={onAdd}>
+              Add a source
+            </button>
+          </div>
         )}
       </section>
 
-      <Chat notebookId={Number(id)} />
-    </main>
+      <div className="ai-note">
+        <Icon name="sparkle" size={16} className="i-sparkle" /> Open Chat to ask across all{" "}
+        {plural(bundle.sources.length, "source")} — every answer cites its segment.
+      </div>
+    </div>
   );
 }

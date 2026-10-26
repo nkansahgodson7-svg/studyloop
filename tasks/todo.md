@@ -65,6 +65,63 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
 - [ ] Task 16: Turso push script + Vercel env docs + CSP/security polish + final gate + deploy walkthrough
   - Acceptance: spec success criteria #1–#11 check off; `git push` deploys; admin + friend accounts work on live URL
 
+## Phase 8: Pixel-perfect UI (frontend/ mockup → real app)
+
+Spec: `design.md` + `frontend/` mockup · Plan: `tasks/plan.md` Phase 8
+Intent (confirmed 2026-10-26): visuals + motion + interactions indistinguishable
+from the mockup, on the real backend; mockup behavior wins where backend gaps exist.
+
+- [x] P8-1: Design foundation — globals.css ← full styles.css; shell layout +
+  viewport/theme-color/favicon metadata; Icon set port
+  - Acceptance: every CSS class in frontend/styles.css resolves identically in the app; fonts load the same; console clean
+  - Verify: gate; dev-server page against a mockup screenshot at 390 px
+  - Files: src/app/globals.css, src/app/layout.tsx, src/components/ui/icons.tsx
+- [x] P8-2: Transition + chrome system — ScreenSection entry, snapshot exits,
+  TabBar, Toast, Sheet providers
+  - Acceptance: push/pop/fade directions match mockup's swap(); tab bar shows 4 items w/ 4 px brand dot; sheets trap focus, close on esc/scrim, restore focus; toasts ≥2.6 s one-at-a-time
+  - Verify: gate; manual + browser motion walk
+  - Files: src/components/ui/{ScreenSection,Transition,TabBar,Toast,Sheet}.tsx, src/lib/depth.ts
+- [x] P8-3: Auth surfaces — login screen port + demo account + guard
+  - Acceptance: parity DOM/classes; demo button logs in demo@studyloop.app; unauth redirect to /login; authed on /login → /
+  - Verify: gate; live login flow
+  - Files: src/app/login/page.tsx, src/components/ui/auth/*; deps P8-1, P8-2, P8-13
+- [x] P8-4: Home "Today" — greeting + hero (ring/streak) + rows + new-notebook sheet
+  - Acceptance: parity; real data (summary + notebooks); loading skeleton + empty state
+  - Verify: gate; browser compare
+  - Files: src/app/page.tsx, src/components/ui/{Ring,Hero,NotebookRow}.tsx; deps P8-2, P8-13
+- [x] P8-5: Library — parity rows + honest empty state; deps P8-2
+- [x] P8-6: Review hub — dark due card + per-notebook due rows; deps P8-2, P8-13
+- [x] P8-7: Notebook scaffold + Overview — header/hero/segmented/tabs + sources; deps P8-2
+- [x] P8-8: Add-source sheet — kinds/fields/processing; PDF/text/YT wiring; deps P8-2, P8-7
+- [x] P8-9: Cards tab + generate sheet → real generation; deps P8-7
+- [x] P8-10: Chat tab — mockup DOM on real SSE; deps P8-7, existing Chat.tsx logic
+- [x] P8-11: Review session — fixed screen + swipe physics + keyboard + practice/summary; deps P8-2, P8-13
+- [x] P8-12: Settings — profile/key row + key sheet/reset demo/sign out; deps P8-2, P8-13
+- [x] P8-13: Backend parity — /api/me/summary, cardsDue ?all=1, source meta in
+  list, POST /api/me/reset-demo (faithful reseed w/ review states), demo account
+  - Acceptance: unit tests per endpoint; summary numbers correct on fixtures
+  - Verify: npm test; gate
+  - Files: src/lib/server/{summary,cards,sources,seed}.ts + tests, new route files
+- [x] P8-14: Cross-screen audit — titles/back paths/reduced-motion/320 px/zoom/empties; gate
+- [x] P8-15: Browser parity pass — side-by-side 390/720 px, motion walk, drift fixes
+
 ## Checkpoints
 
 After each phase's tasks: full gate green + checkpoint list in plan.md reviewed before next phase.
+
+### Phase 8 completion notes (2026-10-26)
+- P8-13 delivered as P8-13a (GET /api/me/summary + streakDaysForUser) and P8-13b
+  (source meta strings at ingest: "N pages · M chunks" pdf via client pageCount,
+  "N min · M chunks" youtube via transcript duration, "N chunks" text; POST
+  /api/me/reset-demo reseeding three demo notebooks with review state + generated
+  flags). cardsDue ?all=1 dropped — practice mode builds its queue client-side.
+- cards gained generated_at (schema ALTER best-effort) driving the cards-panel
+  "Study cards / Generated" grouping; generation + demo seed set it.
+- StrictMode purity fix in review session: grade side-effects moved out of the
+  setState updater with a sessionRef + grading guard (was double-POSTing grades).
+- /review/session wrapped in Suspense (useSearchParams prerender bailout).
+- TabBar settings icon is the mockup gear (sliders icon belongs to the greeting
+  button only).
+- Parity pass at 390x720 vs /mock/index.html: home, library, review, notebook
+  (overview/chat/cards), session, settings all structurally identical; remaining
+  differences are data-driven (counts, order, per-notebook suggestion chips).

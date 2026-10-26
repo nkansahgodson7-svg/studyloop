@@ -188,7 +188,7 @@ SVG, track `rgba` 12–18%, stroke 6–8, round caps, `-90deg` start. Animated w
 
 ### Flashcard
 
-Full-width surface card, min-height 340, prompt `h1` serif centered, muted "Tap to reveal". Back: answer body + hairline + source chip. Grade row appears only after reveal: Again / Hard / Good / Easy, each with an interval hint. Keyboard: Space reveal, 1–4 grade.
+Full-width surface card, min-height 340, prompt `h1` serif centered, muted "Tap to reveal". Back: answer body + hairline + source chip. Grade row appears only after reveal: Again / Hard / Good / Easy, each with an interval hint. Once revealed the card is draggable: left Again, right Good, up Easy, down Hard, with directional cue chips that tint and scale as the threshold approaches. A 72 px horizontal / 86 px vertical throw commits the grade; anything shorter springs back. Buttons remain for taps and accessibility. Keyboard: Space reveal, 1–4 grade.
 
 ---
 
@@ -201,6 +201,7 @@ Full-width surface card, min-height 340, prompt `h1` serif centered, muted "Tap 
 | Tab switch | Cross-fade + 6 px rise, 180 ms |
 | Sheet | Up 100% → 0 with scrim fade, 320 ms |
 | Card reveal | Cross-fade + 1.5% scale, 220 ms |
+| Card swipe | Live 1:1 drag with 3.5% tilt and cue fade; release past threshold flies out 260 ms then grades; below threshold springs back 200 ms |
 | Ring / progress | `stroke-dashoffset` 600 ms |
 | Toast | 8 px rise + fade, 180 ms |
 
@@ -254,7 +255,7 @@ Full-width surface card, min-height 340, prompt `h1` serif centered, muted "Tap 
 - Semantic landmarks: `main`, `nav`, `header`, one `h1` per screen, ordered headings.
 - Live regions: chat log `aria-live="polite"`, toasts `role="status"`, errors `role="alert"`.
 - Sheets are `role="dialog"` + `aria-modal`, labelled by their title, with focus in/out handling.
-- Flashcard reveal and grading are reachable by keyboard; grade buttons expose their interval in text.
+- Flashcard reveal and grading are reachable by keyboard; grade buttons expose their interval in text. Swipe grading is an accelerator only — every swipe outcome also has a labeled button.
 - Color is never the only signal: due states pair color with labels ("Due", "Scheduled").
 - Visible focus ring on every interactive element; no `outline: none` without replacement.
 - Support 200% zoom; no horizontal scroll at 320 px.

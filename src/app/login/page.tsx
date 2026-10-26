@@ -1,69 +1,133 @@
-'use client';
+"use client";
 
-import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { ScreenSection } from "@/components/ui/ScreenSection";
+import { useToast } from "@/components/ui/Toast";
+import { DEMO_EMAIL, DEMO_PASSWORD } from "@/lib/client/demo";
+
+function nameFromEmail(email: string): string {
+  const prefix = email.split("@")[0] || "learner";
+  if (prefix.toLowerCase() === "demo") return "Ada Lovelace";
+  return prefix
+    .split(/[._-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const { toast } = useToast();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function signIn(nextEmail: string, nextPassword: string) {
     setError(null);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(nextEmail)) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    if (nextPassword.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ email, password })
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: nextEmail, password: nextPassword })
       });
       if (res.ok) {
-        router.replace('/notebooks');
+        const name = nameFromEmail(nextEmail);
+        toast(`Welcome back, ${name.split(" ")[0]}`);
+        router.replace("/");
         router.refresh();
         return;
       }
       const body = (await res.json().catch(() => null)) as { error?: string } | null;
       setError(body?.error ?? `Login failed (${res.status})`);
     } catch {
-      setError('Network error — try again');
+      setError("Network error — try again");
     } finally {
       setSubmitting(false);
     }
   }
 
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await signIn(email.trim(), password);
+  }
+
   return (
-    <main>
-      <h1>StudyLoop</h1>
-      <form onSubmit={handleSubmit} aria-busy={submitting}>
-        <label htmlFor="email">Email</label>
-        <input
-          id="email"
-          type="email"
-          required
-          autoComplete="username"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-        />
-
-        <label htmlFor="password">Password</label>
-        <input
-          id="password"
-          type="password"
-          required
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
-
-        <button type="submit" disabled={submitting}>
-          Log in
-        </button>
-
-        {error ? <p role="alert">{error}</p> : null}
-      </form>
-    </main>
+    <ScreenSection>
+      <div className="auth">
+        <div className="auth__brand">
+          <span className="auth__orb" aria-hidden="true" />
+          <p className="eyebrow">AI study workspace</p>
+          <h1 className="auth__mark">
+            Study<em>Loop</em>
+          </h1>
+          <p className="muted text-pretty">
+            Turn your own notes into grounded answers, flashcards, and a daily review loop.
+          </p>
+        </div>
+        <form className="auth__form" onSubmit={handleSubmit} noValidate>
+          <div className="field">
+            <label className="label" htmlFor="email">
+              Email
+            </label>
+            <input
+              className="input"
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="username"
+              placeholder="you@university.edu"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+          </div>
+          <div className="field">
+            <label className="label" htmlFor="password">
+              Password
+            </label>
+            <input
+              className="input"
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="At least 6 characters"
+              required
+              minLength={6}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+          <p className="form-error" role="alert" hidden={error === null}>
+            {error ?? ""}
+          </p>
+          <button className="btn btn--primary btn--block" type="submit" id="loginBtn" disabled={submitting}>
+            {submitting ? "Signing in…" : "Sign in"}
+          </button>
+          <button
+            className="btn btn--ghost btn--sm btn--block"
+            type="button"
+            disabled={submitting}
+            onClick={() => void signIn(DEMO_EMAIL, DEMO_PASSWORD)}
+          >
+            Use demo account
+          </button>
+        </form>
+        <p className="auth__hint">
+          <b>Demo:</b> sign in with {DEMO_EMAIL} and the password {DEMO_PASSWORD}.
+        </p>
+      </div>
+    </ScreenSection>
   );
 }
