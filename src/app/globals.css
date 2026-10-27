@@ -1294,6 +1294,16 @@ svg {
   animation: shimmer 1.3s linear infinite;
 }
 
+.skeleton--dark {
+  background: linear-gradient(
+    100deg,
+    rgba(247, 243, 231, 0.1) 20%,
+    rgba(247, 243, 231, 0.24) 46%,
+    rgba(247, 243, 231, 0.1) 72%
+  );
+  background-size: 220% 100%;
+}
+
 @keyframes shimmer {
   from {
     background-position: 130% 0;
@@ -1778,6 +1788,23 @@ svg {
   font-weight: 550;
 }
 
+.auth__switch {
+  margin-top: 18px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.auth__switch a {
+  color: var(--brand);
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.auth__switch a:hover {
+  text-decoration: underline;
+}
+
 .tabbar {
   display: none;
   position: absolute;
@@ -1810,6 +1837,7 @@ svg {
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  text-decoration: none;
   transition: color 0.16s, background 0.16s;
 }
 

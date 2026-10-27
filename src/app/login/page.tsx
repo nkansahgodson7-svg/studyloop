@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useToast } from "@/components/ui/Toast";
-import { DEMO_EMAIL, DEMO_PASSWORD } from "@/lib/client/demo";
+import { clearSessionCaches } from "@/lib/client/cache";
 
 function nameFromEmail(email: string): string {
   const prefix = email.split("@")[0] || "learner";
@@ -44,8 +45,8 @@ export default function LoginPage() {
       if (res.ok) {
         const name = nameFromEmail(nextEmail);
         toast(`Welcome back, ${name.split(" ")[0]}`);
+        clearSessionCaches();
         router.replace("/");
-        router.refresh();
         return;
       }
       const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -115,17 +116,9 @@ export default function LoginPage() {
           <button className="btn btn--primary btn--block" type="submit" id="loginBtn" disabled={submitting}>
             {submitting ? "Signing in…" : "Sign in"}
           </button>
-          <button
-            className="btn btn--ghost btn--sm btn--block"
-            type="button"
-            disabled={submitting}
-            onClick={() => void signIn(DEMO_EMAIL, DEMO_PASSWORD)}
-          >
-            Use demo account
-          </button>
         </form>
-        <p className="auth__hint">
-          <b>Demo:</b> sign in with {DEMO_EMAIL} and the password {DEMO_PASSWORD}.
+        <p className="auth__switch">
+          New here? <Link href="/signup">Create an account</Link>
         </p>
       </div>
     </ScreenSection>

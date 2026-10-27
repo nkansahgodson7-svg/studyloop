@@ -44,18 +44,10 @@ export interface ChatFrame {
 }
 
 export async function loadNotebook(id: number): Promise<NotebookBundle> {
-  const [notebook, sourcesRes, cardsRes, chatRes] = await Promise.all([
-    getJson<{ id: number; title: string }>(`/api/notebooks/${id}`),
-    getJson<NotebookSource[]>(`/api/notebooks/${id}/sources`),
-    getJson<{ cards: NotebookCard[] }>(`/api/notebooks/${id}/cards`),
-    getJson<{ messages: NotebookChatMessage[] }>(`/api/notebooks/${id}/chat/messages`)
-  ]);
+  const bundle = await getJson<NotebookBundle>(`/api/notebooks/${id}/bundle`);
   return {
-    id: notebook.id,
-    title: notebook.title,
-    sources: sourcesRes.map((source) => (source.meta === "{}" ? { ...source, meta: "" } : source)),
-    cards: cardsRes.cards,
-    messages: chatRes.messages
+    ...bundle,
+    sources: bundle.sources.map((source) => (source.meta === "{}" ? { ...source, meta: "" } : source))
   };
 }
 

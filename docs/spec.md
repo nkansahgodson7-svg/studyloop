@@ -11,8 +11,9 @@ daily learning loop.
 Fills the gap between NotebookLM (grounding, no review loop) and the abandoned
 local-only `ai-study-partner-react` (quizzes, but single-user, BYO-key, loopback).
 
-**Users:** closed group. Every user logs in with email + password. First account is
-admin; admin creates and manages all other accounts. No public signup.
+**Users:** closed group. Every user logs in with email + password. Self-service
+signup is gated by a shared invite code (`SIGNUP_INVITE_CODE`); the first account
+is seeded by script, and admins can still create and manage accounts directly.
 
 **Success:** the group is still reviewing due cards most days weeks after launch.
 
@@ -29,6 +30,8 @@ admin; admin creates and manages all other accounts. No public signup.
   editing, per-notebook deck
 - Review loop: FSRS scheduling (via `ts-fsrs`), 4-button grading, "Today" due
   queue, simple streak counter
+- Auth: invite-code signup with auto-login, plus login/logout; signup is closed
+  when no invite code is configured
 - Admin: create/disable users, view usage basics
 - Settings: optional personal API key (BYO) per user; nothing else beyond account
 - Key strategy: hybrid — owner's key from env (`GROQ_API_KEY`) is the default for
@@ -38,7 +41,8 @@ admin; admin creates and manages all other accounts. No public signup.
 
 ## Out of scope (v1)
 
-- Public signup, billing, usage metering/metered quotas
+- Open public signup (registration requires an invite code), billing, usage
+  metering/metered quotas
 - Native/mobile apps, PWA push
 - Audio/video playback, video download, OCR of scanned PDFs
 - Vector embeddings / semantic search (FTS5 first; revisit only if retrieval is bad)
@@ -49,7 +53,8 @@ admin; admin creates and manages all other accounts. No public signup.
 
 - **Frontend:** Next.js (App Router) + React 19 + TypeScript (strict) · Zustand · `pdfjs-dist` (client-side)
 - **Backend:** Next.js route handlers on Vercel (Node runtime) · `@libsql/client` (async) over **Turso** free tier — libSQL is SQLite, FTS5 included
-- **Auth:** cookie sessions (signed, httpOnly), scrypt hashes (`node:crypto`), session table in DB
+- **Auth:** cookie sessions (httpOnly), scrypt hashes (`node:crypto`), session
+  table in DB; invite-code signup (`SIGNUP_INVITE_CODE`, closed when unset)
 - **LLM:** Groq OpenAI-compatible API, called server-side only; default key from
   env (`GROQ_API_KEY`), per-user BYO key override stored AES-GCM-encrypted in
   `users.llm_key_encrypted`; quiz generation pinned to the 120b model, other
@@ -186,6 +191,8 @@ export async function createNotebook(userId: number, title: string): Promise<Not
     user without one degrades to the owner's key (mocked-provider test). Keys
     never appear in API responses or logs
 11. The four-command gate passes; no route lacks a rejection test
+12. Invite-gated signup creates a user, auto-issues a session, and rejects a
+    wrong invite (403) or a missing invite configuration (503)
 
 ## Open Questions
 

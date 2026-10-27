@@ -12,6 +12,7 @@ import ChatPanel from "@/components/notebook/ChatPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
+import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 
 type Tab = "overview" | "chat" | "cards";
 
@@ -175,6 +176,7 @@ export default function NotebookScreen() {
     sheet.open(<AddSourceSheetContent notebookId={id} notebookTitle={bundle.title} onSuccess={() => {
       sheet.close();
       toast("Source added");
+      void notebookViewsCache.load({ force: true }).catch(() => undefined);
       void reload(true);
     }} />);
   }
@@ -220,6 +222,10 @@ export default function NotebookScreen() {
       if (res.ok || res.status === 404) {
         sheet.close();
         toast("Notebook deleted");
+        const current = notebookViewsCache.get();
+        if (current) notebookViewsCache.set(current.filter((view) => view.notebook.id !== id));
+        else notebookViewsCache.invalidate();
+        summaryCache.invalidate();
         router.push("/library");
       } else {
         sheet.close();
@@ -276,6 +282,8 @@ export default function NotebookScreen() {
       if (createdTotal === 0) {
         toast(lastError || "No new cards in these sources");
       } else {
+        void notebookViewsCache.load({ force: true }).catch(() => undefined);
+        summaryCache.invalidate();
         await reload(true);
         toast("Cards generated");
       }

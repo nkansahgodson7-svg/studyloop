@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { tabVisibleFor } from "@/lib/navigation";
 
 const TABS: Array<{ label: string; href: string }> = [
@@ -10,7 +11,6 @@ const TABS: Array<{ label: string; href: string }> = [
   { label: "Settings", href: "/settings" }
 ];
 export function TabBar() {
-  const router = useRouter();
   const pathname = usePathname();
   const path = (pathname.split("?")[0] ?? "").replace(/\/+$/, "") || "/";
   const visible = tabVisibleFor(pathname);
@@ -18,12 +18,11 @@ export function TabBar() {
   return (
     <nav className={`tabbar ${visible ? "is-visible" : ""}`} aria-label="Primary">
       {TABS.map((tab) => (
-        <button
+        <Link
           key={tab.href}
           className={`tabbar__item ${path === tab.href ? "is-active" : ""}`}
-          type="button"
+          href={tab.href}
           aria-current={path === tab.href ? "page" : undefined}
-          onClick={() => router.push(tab.href)}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             {tab.href === "/" && <path d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z" />}
@@ -47,7 +46,7 @@ export function TabBar() {
             )}
           </svg>
           <span>{tab.label}</span>
-        </button>
+        </Link>
       ))}
     </nav>
   );

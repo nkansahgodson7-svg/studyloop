@@ -2,7 +2,7 @@ import type { Client } from '@libsql/client';
 import { type } from 'arktype';
 import { NextResponse } from 'next/server';
 import { hashPassword } from './crypto';
-import { createUser, listUsers, setUserDisabled } from './repo';
+import { createUser, isUniqueViolation, listUsers, setUserDisabled } from './repo';
 import { errorResponse, requireAdmin } from './auth';
 
 const MIN_PASSWORD_LENGTH = 12;
@@ -68,11 +68,6 @@ export async function adminCreateUser(db: Client, req: Request): Promise<NextRes
     }
     throw error;
   }
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  const code = (error as { code?: string }).code ?? '';
-  return code.startsWith('SQLITE_CONSTRAINT') && /\bUNIQUE\b/i.test((error as Error).message ?? '');
 }
 
 export async function adminSetDisabled(db: Client, req: Request, idRaw: string): Promise<NextResponse> {

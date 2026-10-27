@@ -142,3 +142,7 @@ export async function setUserDisabled(db: Client, userId: number, disabled: bool
   }
 }
 
+export function isUniqueViolation(error: unknown): boolean {
+  const code = (error as { code?: string }).code ?? '';
+  return code.startsWith('SQLITE_CONSTRAINT') && /\bUNIQUE\b/i.test((error as Error).message ?? '');
+}

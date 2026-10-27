@@ -236,6 +236,7 @@ Full-width surface card, min-height 340, prompt `h1` serif centered, muted "Tap 
 | Route | Screen | Key elements |
 |---|---|---|
 | `#/login` | Sign in | Wordmark, email/password, demo hint, error state |
+| `#/signup` | Create account | Wordmark, invite code/email/password, sign-in link, error state |
 | `#/home` | Today | Greeting, dark loop hero with ring + streak, notebook list, new-notebook sheet |
 | `#/review` | Review hub | Due total, per-notebook due rows, start session |
 | `#/notebook/:id` | Notebook | Hero, segmented tabs: Overview / Chat / Cards |

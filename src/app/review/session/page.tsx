@@ -8,6 +8,7 @@ import { Ring } from "@/components/ui/Ring";
 import { Icon, clamp, plural } from "@/components/ui/icons";
 import { getJson, type CardRow, type Notebook, type SourceRow } from "@/lib/client/api";
 import type { UserSummary } from "@/lib/client/summary";
+import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 
 type GradeKey = "again" | "hard" | "good" | "easy";
 const RATING: Record<GradeKey, number> = { again: 1, hard: 2, good: 3, easy: 4 };
@@ -95,18 +96,23 @@ function ReviewSession() {
         const notebooks: Notebook[] = notebookParam && notebookParam !== "all"
           ? [{ id: Number(notebookParam), title: "", createdAt: "" }]
           : await getJson<Notebook[]>("/api/notebooks");
+        const collected = await Promise.all(
+          notebooks.map(async (notebook) => {
+            const [sources, cardsRes, detail] = await Promise.all([
+              getJson<SourceRow[]>(`/api/notebooks/${notebook.id}/sources`),
+              getJson<{ cards: CardRow[] }>(`/api/notebooks/${notebook.id}/cards`),
+              notebookParam && notebookParam !== "all" ? getJson<Notebook>(`/api/notebooks/${notebook.id}`) : Promise.resolve(null)
+            ]);
+            return { notebook, sources, cards: cardsRes.cards, title: detail?.title };
+          })
+        );
         const queue: QueueEntry[] = [];
         let label = "All notebooks";
-        for (const notebook of notebooks) {
-          const [sources, cardsRes, detail] = await Promise.all([
-            getJson<SourceRow[]>(`/api/notebooks/${notebook.id}/sources`),
-            getJson<{ cards: CardRow[] }>(`/api/notebooks/${notebook.id}/cards`),
-            notebookParam && notebookParam !== "all" ? getJson<Notebook>(`/api/notebooks/${notebook.id}`) : Promise.resolve(null)
-          ]);
+        const now = Date.now();
+        for (const { notebook, sources, cards, title } of collected) {
           const sourceTitles = new Map(sources.map((source) => [source.id, source.title]));
-          if (detail) label = detail.title;
-          const now = Date.now();
-          for (const card of cardsRes.cards) {
+          if (title) label = title;
+          for (const card of cards) {
             const due = card.due ? new Date(card.due).getTime() : now;
             if (!practice && due > now) continue;
             queue.push({
@@ -193,7 +199,11 @@ function ReviewSession() {
   useEffect(() => {
     if (!session?.finished) return;
     const timer = window.setTimeout(() => {
-      void getJson<UserSummary>("/api/me/summary").then(setSummary).catch(() => undefined);
+      void notebookViewsCache.load({ force: true }).catch(() => undefined);
+      void summaryCache
+        .load({ force: true })
+        .then(setSummary)
+        .catch(() => undefined);
     }, 400);
     return () => window.clearTimeout(timer);
   }, [session?.finished]);

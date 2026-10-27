@@ -10,11 +10,14 @@ import { createSession, createUser } from './repo';
 import {
   createNotebook,
   listNotebooks,
+  listNotebookViews,
   ownNotebook,
   notebooksCreate,
   notebooksList,
-  notebooksDelete
+  notebooksDelete,
+  notebooksViews
 } from './notebooks';
+import { createCard } from './cards';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -182,5 +185,69 @@ describe('notebook delete', () => {
 
     const gone = await notebooksDelete(db, await reqWithCookie(`http://x/api/notebooks/999999`, ownerToken), '999999');
     expect(gone.status).toBe(404);
+  });
+});
+
+describe('notebook views', () => {
+  let db: Client;
+  let ownerToken: string;
+  let ownerId: number;
+
+  beforeAll(async () => {
+    db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-nbviews-')), 'nbviews.db'));
+    await applySchema(db);
+    const owner = await userWithToken(db, 'views.owner@test.local', 'user');
+    ownerToken = owner.token;
+    ownerId = owner.id;
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it('counts sources, cards, and due cards per notebook in one query', async () => {
+    const notebook = await createNotebook(db, ownerId, 'Cell Biology');
+    await db.execute({
+      sql: "INSERT INTO sources (notebook_id, kind, title, text) VALUES (?, 'text', ?, ?)",
+      args: [notebook.id, 'Lecture 1', 'Cells are the unit of life.']
+    });
+    const dueCard = await createCard(db, notebook.id, { front: 'Mitochondria?', back: 'Powerhouse.' });
+    const laterCard = await createCard(db, notebook.id, { front: 'Nucleus?', back: 'Control center.' });
+    await db.execute({
+      sql: 'UPDATE reviews SET due = ? WHERE card_id = ?',
+      args: [new Date(Date.now() + 86_400_000).toISOString(), laterCard.id]
+    });
+
+    const views = await listNotebookViews(db, ownerId, new Date());
+
+    expect(views).toHaveLength(1);
+    expect(views[0]).toMatchObject({
+      notebook: { id: notebook.id, title: 'Cell Biology' },
+      sources: 1,
+      cards: 2,
+      due: 1
+    });
+    expect(views[0]!.notebook.id).toBe(notebook.id);
+    expect(dueCard.id).toBeGreaterThan(0);
+  });
+
+  it('returns only the caller notebooks and rejects unauthenticated requests', async () => {
+    const fresh = await createUser(db, {
+      email: 'views.empty@test.local',
+      passwordHash: await hashPassword(PASSWORD),
+      role: 'user'
+    });
+    const token = await createSession(db, fresh.id);
+
+    const emptyRes = await notebooksViews(db, await reqWithCookie('http://x/api/notebooks/views', token));
+    expect(emptyRes.status).toBe(200);
+    expect(await emptyRes.json()).toEqual([]);
+
+    const ownerRes = await notebooksViews(db, await reqWithCookie('http://x/api/notebooks/views', ownerToken));
+    expect(ownerRes.status).toBe(200);
+    expect(await ownerRes.json()).toHaveLength(1);
+
+    const anon = await notebooksViews(db, new Request('http://x/api/notebooks/views'));
+    expect(anon.status).toBe(401);
   });
 });

@@ -9,7 +9,7 @@ export function rootPath(pathname: string): string {
 
 export function routeDepth(pathname: string): number {
   const path = rootPath(pathname);
-  if (path === "/login") return 0;
+  if (path === "/login" || path === "/signup") return 0;
   if (path.startsWith("/notebooks/") && path !== "/notebooks/") return 2;
   if (path.startsWith("/review/session")) return 3;
   if (path === "/" || path === "/review" || path === "/library" || path === "/settings") return 1;
@@ -36,6 +36,7 @@ export function directionFor(prev: string, next: string): NavDirection {
 
 const TITLES: Array<[RegExp, string]> = [
   [/\/login$/, "Sign in"],
+  [/\/signup$/, "Create account"],
   [/\/review\/session/, "Review session"],
   [/\/notebooks\/[^/]+$/, "Notebook"],
   [/\/review$/, "Review"],

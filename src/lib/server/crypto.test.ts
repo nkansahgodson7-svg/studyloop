@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decryptSecret, encryptSecret, hashPassword, sessionToken, verifyPassword } from './crypto';
+import { decryptSecret, encryptSecret, hashPassword, sessionToken, verifyPassword, verifySecret } from './crypto';
 
 describe('password hashing', () => {
   it('hashes and verifies a password, refusing wrong ones', async () => {
@@ -25,6 +25,16 @@ describe('BYO-key envelope', () => {
   it('fails to decrypt with the wrong secret', () => {
     const blob = encryptSecret('gsk_secret123', 'secret-A'.repeat(4));
     expect(() => decryptSecret(blob, 'secret-B'.repeat(4))).toThrow();
+  });
+});
+
+describe('invite secrets', () => {
+  it('accepts the exact secret and rejects any other value', () => {
+    expect(verifySecret('invite-code-123', 'invite-code-123')).toBe(true);
+    expect(verifySecret('invite-code-124', 'invite-code-123')).toBe(false);
+    expect(verifySecret('invite-code-123 ', 'invite-code-123')).toBe(false);
+    expect(verifySecret('', 'invite-code-123')).toBe(false);
+    expect(verifySecret('a-much-longer-guess', 'invite-code-123')).toBe(false);
   });
 });
 

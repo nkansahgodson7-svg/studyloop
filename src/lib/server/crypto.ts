@@ -1,6 +1,7 @@
 import {
   createCipheriv,
   createDecipheriv,
+  createHash,
   createHmac,
   randomBytes,
   scrypt as scryptCb,
@@ -53,4 +54,14 @@ export function decryptSecret(blob: string, secret: string): string {
 
 export function sessionToken(): string {
   return randomBytes(32).toString('base64url');
+}
+
+/**
+ * Constant-time comparison for short secrets such as invite codes.
+ * Hashing first keeps the comparison independent of the inputs' lengths.
+ */
+export function verifySecret(provided: string, expected: string): boolean {
+  const providedDigest = createHash('sha256').update(provided, 'utf8').digest();
+  const expectedDigest = createHash('sha256').update(expected, 'utf8').digest();
+  return timingSafeEqual(providedDigest, expectedDigest);
 }

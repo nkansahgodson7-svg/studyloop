@@ -1,41 +1,63 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
+import { Skeleton } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { useSheet } from "@/components/ui/Sheet";
 import { SheetFrame } from "@/components/ui/Sheet";
 import { Icon, initialsOf } from "@/components/ui/icons";
-import { getJson } from "@/lib/client/api";
-import type { UserSummary } from "@/lib/client/summary";
+import { clearSessionCaches, meCache, summaryCache, notebookViewsCache } from "@/lib/client/cache";
 
 export default function SettingsPage() {
   const { toast } = useToast();
   const { open, close } = useSheet();
   const router = useRouter();
-  const [me, setMe] = useState<{ id: number; email: string; name?: string; hasPersonalKey?: boolean } | null>(null);
-  const [summary, setSummary] = useState<UserSummary | null>(null);
+  const [me, setMe] = useState(() => meCache.get());
+  const [summary, setSummary] = useState(() => summaryCache.get());
   const [unauthorized, setUnauthorized] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [user, stats] = await Promise.all([
-        getJson<{ id: number; email: string; name?: string; hasPersonalKey?: boolean }>("/api/auth/me"),
-        getJson<UserSummary>("/api/me/summary")
-      ]);
-      setMe(user);
-      setSummary(stats);
-    } catch (error) {
-      if (error instanceof Error && error.message === "authentication required") {
-        setUnauthorized(true);
-      }
-    }
-  }, []);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    let active = true;
+    const unsubscribeMe = meCache.subscribe((user) => {
+      if (active) setMe(user);
+    });
+    const unsubscribeSummary = summaryCache.subscribe((stats) => {
+      if (active) setSummary(stats);
+    });
+
+    void Promise.all([meCache.load(), summaryCache.load()]).catch((error) => {
+      if (!active) return;
+      if ((error as { status?: number }).status === 401) {
+        setUnauthorized(true);
+        return;
+      }
+      toast("Could not load your account");
+    });
+
+    return () => {
+      active = false;
+      unsubscribeMe();
+      unsubscribeSummary();
+    };
+  }, [toast]);
+
+  async function reloadMe() {
+    try {
+      await meCache.load({ force: true });
+    } catch {
+      toast("Could not refresh your account");
+    }
+  }
+
+  async function reloadAll() {
+    try {
+      await Promise.all([meCache.load({ force: true }), summaryCache.load({ force: true })]);
+    } catch {
+      toast("Could not refresh your account");
+    }
+  }
 
   if (unauthorized) {
     return (
@@ -53,7 +75,7 @@ export default function SettingsPage() {
     );
   }
 
-  const name = me?.name || me?.email?.split("@")[0] || "Learner";
+  const name = me?.email?.split("@")[0] || "Learner";
   const hasKey = Boolean(me?.hasPersonalKey);
 
   function openKeySheet() {
@@ -73,7 +95,7 @@ export default function SettingsPage() {
           if (res.status === 201) {
             close();
             toast("Personal key saved");
-            void load();
+            void reloadMe();
             return;
           }
           const body = (await res.json().catch(() => null)) as { error?: string } | null;
@@ -112,7 +134,7 @@ export default function SettingsPage() {
                   if (res.ok) {
                     close();
                     toast("Personal key removed");
-                    void load();
+                    void reloadMe();
                     return;
                   }
                   toast("Could not remove key");
@@ -144,7 +166,7 @@ export default function SettingsPage() {
             {initialsOf(name)}
           </span>
           <div className="grow">
-            <p className="profile__name">{name}</p>
+            <p className="profile__name">{me ? name : <Skeleton height={14} width={120} />}</p>
             <p className="profile__mail">{me?.email ?? "…"}</p>
           </div>
           <span className="chip chip--brand">
@@ -182,7 +204,9 @@ export default function SettingsPage() {
               const res = await fetch("/api/me/reset-demo", { method: "POST" });
               if (res.ok) {
                 toast("Demo data restored");
-                void load();
+                clearSessionCaches();
+                notebookViewsCache.invalidate();
+                void reloadAll();
               } else {
                 toast("Could not reset demo data");
               }
@@ -206,6 +230,7 @@ export default function SettingsPage() {
           type="button"
           onClick={async () => {
             await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+            clearSessionCaches();
             router.push("/login");
           }}
         >

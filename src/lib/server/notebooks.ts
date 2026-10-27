@@ -43,6 +43,40 @@ export async function listNotebooks(db: Client, userId: number): Promise<Noteboo
   return result.rows.map(rowToNotebook);
 }
 
+export interface NotebookViewRow {
+  notebook: NotebookRow;
+  sources: number;
+  cards: number;
+  due: number;
+}
+
+export async function listNotebookViews(
+  db: Client,
+  userId: number,
+  now: Date
+): Promise<NotebookViewRow[]> {
+  const result = await db.execute({
+    sql: `SELECT nb.id, nb.user_id, nb.title, nb.created_at,
+                 COUNT(DISTINCT s.id) AS sources,
+                 COUNT(DISTINCT c.id) AS cards,
+                 COUNT(DISTINCT CASE WHEN r.due <= ? THEN c.id END) AS due
+          FROM notebooks nb
+          LEFT JOIN sources s ON s.notebook_id = nb.id
+          LEFT JOIN cards c ON c.notebook_id = nb.id
+          LEFT JOIN reviews r ON r.card_id = c.id
+          WHERE nb.user_id = ?
+          GROUP BY nb.id
+          ORDER BY nb.created_at DESC, nb.id DESC`,
+    args: [now.toISOString(), userId]
+  });
+  return result.rows.map((row) => ({
+    notebook: rowToNotebook(row),
+    sources: Number(row.sources),
+    cards: Number(row.cards),
+    due: Number(row.due)
+  }));
+}
+
 export async function ownNotebook(db: Client, userId: number, id: number): Promise<NotebookRow | null> {
   const result = await db.execute({
     sql: `SELECT ${NOTEBOOK_COLUMNS} FROM notebooks WHERE id = ? AND user_id = ?`,
@@ -64,6 +98,15 @@ export async function notebooksList(db: Client, req: Request): Promise<NextRespo
   try {
     const user = await requireUser(db, req);
     return NextResponse.json(await listNotebooks(db, user.id));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+export async function notebooksViews(db: Client, req: Request): Promise<NextResponse> {
+  try {
+    const user = await requireUser(db, req);
+    return NextResponse.json(await listNotebookViews(db, user.id, new Date()));
   } catch (error) {
     return errorResponse(error);
   }

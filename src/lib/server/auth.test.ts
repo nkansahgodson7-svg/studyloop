@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Client } from '@libsql/client';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
 import { createSession, createUser } from './repo';
-import { requireAdmin, requireUser, HttpError, login, logout, me } from './auth';
+import { requireAdmin, requireUser, HttpError, login, logout, me, signup } from './auth';
+import { resetRateLimits } from './ratelimit';
 import { seedAdmin } from './seed-admin';
 
 const PASSWORD = 'correct horse battery staple';
@@ -160,6 +161,170 @@ describe('login route', () => {
       body: 'not json'
     }));
     expect(res.status).toBe(400);
+  });
+});
+
+describe('signup route', () => {
+  const INVITE = 'invite-code-for-tests-123';
+  let dir: string;
+  let db: Client;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'studyloop-signup-'));
+    db = makeLocalDb(join(dir, 'signup.db'));
+    await applySchema(db);
+  });
+
+  beforeEach(() => {
+    resetRateLimits();
+  });
+
+  afterAll(async () => {
+    await db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  function signupRequest(email: string, password: string, inviteCode: string, role?: string): Request {
+    return new Request('http://x/api/auth/signup', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.10' },
+      body: JSON.stringify({ email, password, inviteCode, ...(role ? { role } : {}) })
+    });
+  }
+
+  it('creates a user and signs them in with an httpOnly session cookie', async () => {
+    const res = await signup(
+      db,
+      signupRequest('New.User@Test.Local', PASSWORD, INVITE),
+      INVITE
+    );
+
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      email: 'new.user@test.local',
+      role: 'user',
+      hasPersonalKey: false
+    });
+    expect(body).not.toHaveProperty('passwordHash');
+
+    const cookie = res.cookies.get('sl_session');
+    expect(cookie).toBeDefined();
+    expect(cookie?.httpOnly).toBe(true);
+    expect(cookie?.sameSite).toBe('lax');
+    expect(cookie?.maxAge).toBeGreaterThan(0);
+
+    const sessions = await db.execute({
+      sql: 'SELECT user_id FROM sessions WHERE token = ?',
+      args: [cookie!.value]
+    });
+    expect(sessions.rows.length).toBe(1);
+  });
+
+  it('forces the user role even when the body asks for admin', async () => {
+    const res = await signup(
+      db,
+      signupRequest('not.admin@test.local', PASSWORD, INVITE, 'admin'),
+      INVITE
+    );
+
+    expect(res.status).toBe(201);
+    expect((await res.json()).role).toBe('user');
+
+    const row = await db.execute({
+      sql: 'SELECT role FROM users WHERE email = ?',
+      args: ['not.admin@test.local']
+    });
+    expect(row.rows[0]!.role).toBe('user');
+  });
+
+  it('rejects a wrong invite code with 403', async () => {
+    const res = await signup(
+      db,
+      signupRequest('wrong.invite@test.local', PASSWORD, 'not-the-code'),
+      INVITE
+    );
+    expect(res.status).toBe(403);
+  });
+
+  it('disables signup with 503 when no invite code is configured', async () => {
+    const res = await signup(
+      db,
+      signupRequest('closed@test.local', PASSWORD, INVITE),
+      ''
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it('rejects a short password with 400', async () => {
+    const res = await signup(
+      db,
+      signupRequest('short@test.local', 'short', INVITE),
+      INVITE
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects malformed JSON with 400', async () => {
+    const res = await signup(
+      db,
+      new Request('http://x/api/auth/signup', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.11' },
+        body: 'not json'
+      }),
+      INVITE
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('rejects an already-registered email with 409', async () => {
+    await createUser(db, {
+      email: 'taken@test.local',
+      passwordHash: await hashPassword(PASSWORD),
+      role: 'user'
+    });
+
+    const res = await signup(
+      db,
+      signupRequest('taken@test.local', PASSWORD, INVITE),
+      INVITE
+    );
+    expect(res.status).toBe(409);
+  });
+
+  it('lets a newly created account log in', async () => {
+    const signupRes = await signup(
+      db,
+      signupRequest('fresh@test.local', PASSWORD, INVITE),
+      INVITE
+    );
+    expect(signupRes.status).toBe(201);
+
+    const loginRes = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'fresh@test.local', password: PASSWORD })
+    }));
+    expect(loginRes.status).toBe(200);
+  });
+
+  it('throttles repeated attempts from the same client', async () => {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const res = await signup(
+        db,
+        signupRequest(`throttle-${attempt}@test.local`, PASSWORD, 'wrong'),
+        INVITE
+      );
+      expect(res.status).toBe(403);
+    }
+
+    const blocked = await signup(
+      db,
+      signupRequest('throttle-blocked@test.local', PASSWORD, INVITE),
+      INVITE
+    );
+    expect(blocked.status).toBe(429);
   });
 });
 

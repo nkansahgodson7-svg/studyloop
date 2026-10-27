@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
+import { RowSkeletonList, Skeleton } from "@/components/ui/Skeleton";
 import { Icon, TONES, plural } from "@/components/ui/icons";
 import { useNotebookList } from "@/lib/client/useNotebooks";
 
@@ -28,7 +29,24 @@ export default function ReviewPage() {
         </div>
       </div>
       <div className="px stack--16" style={{ marginTop: 14 }}>
-        {views === null ? null : due > 0 ? (
+        {views === null ? (
+          <>
+            <div
+              className="card card--dark"
+              style={{ padding: 22, display: "grid", gap: 14 }}
+              role="status"
+              aria-label="Loading your review queue"
+            >
+              <Skeleton height={10} width={82} dark />
+              <Skeleton height={48} width={72} dark radius="var(--r-sm)" />
+              <Skeleton height={12} width="70%" dark />
+            </div>
+            <div className="section-head" style={{ marginTop: 26 }}>
+              <h2>By notebook</h2>
+            </div>
+            <RowSkeletonList />
+          </>
+        ) : due > 0 ? (
           <>
             <div className="card--dark card" style={{ padding: 22 }}>
               <p className="eyebrow">Due right now</p>

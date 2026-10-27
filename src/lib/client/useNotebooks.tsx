@@ -1,52 +1,67 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
-import { getJson, loadNotebookViews, type NotebookView } from "./api";
+import { getJson } from "./api";
+import { notebookViewsCache } from "./cache";
 
 export function useNotebookList() {
   const router = useRouter();
   const { open: openSheet, close: closeSheet } = useSheet();
   const { toast } = useToast();
-  const [views, setViews] = useState<NotebookView[] | null>(null);
+  const [views, setViews] = useState(() => notebookViewsCache.get());
   const [creating, setCreating] = useState(false);
-  const alive = useRef(true);
-
-  const load = useCallback(async () => {
-    try {
-      const next = await loadNotebookViews();
-      if (!alive.current) return;
-      setViews(next);
-    } catch (error) {
-      const status = (error as { status?: number }).status;
-      if (!alive.current) return;
-      if (status === 401) {
-        router.replace("/login");
-        return;
-      }
-      toast("Could not load your notebooks");
-    }
-  }, [router, toast]);
 
   useEffect(() => {
-    alive.current = true;
-    void load();
+    let active = true;
+    const unsubscribe = notebookViewsCache.subscribe((next) => {
+      if (active) setViews(next);
+    });
+
+    if (!notebookViewsCache.isFresh()) {
+      void notebookViewsCache.load().catch((error) => {
+        if (!active) return;
+        if ((error as { status?: number }).status === 401) {
+          router.replace("/login");
+          return;
+        }
+        if (notebookViewsCache.get() === null) {
+          toast("Could not load your notebooks");
+        }
+      });
+    }
+
     return () => {
-      alive.current = false;
+      active = false;
+      unsubscribe();
     };
-  }, [load]);
+  }, [router, toast]);
 
   const create = useCallback(
     async (title: string) => {
       setCreating(true);
       try {
-        const notebook = await getJson<{ id: number }>("/api/notebooks", {
+        const notebook = await getJson<{ id: number; title?: string }>("/api/notebooks", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ title })
         });
+        const current = notebookViewsCache.get() ?? [];
+        notebookViewsCache.set([
+          {
+            notebook: {
+              id: notebook.id,
+              title: notebook.title ?? title,
+              createdAt: new Date().toISOString()
+            },
+            sources: 0,
+            cards: 0,
+            due: 0
+          },
+          ...current
+        ]);
         closeSheet();
         toast("Notebook created");
         router.push(`/notebooks/${notebook.id}`);
@@ -97,5 +112,5 @@ export function useNotebookList() {
     );
   }, [create, creating, openSheet]);
 
-  return { views, creating, load, create, openCreateSheet };
+  return { views, creating, create, openCreateSheet };
 }

@@ -1,8 +1,18 @@
 import type { Client } from '@libsql/client';
 import { type } from 'arktype';
 import { NextResponse } from 'next/server';
-import { verifyPassword } from './crypto';
-import { createSession, findUserByEmail, findUserBySession, revokeSession, type SessionUser } from './repo';
+import { hashPassword, verifyPassword, verifySecret } from './crypto';
+import { clientIp, rateLimit } from './ratelimit';
+import {
+  createSession,
+  createUser,
+  findUserByEmail,
+  findUserBySession,
+  isUniqueViolation,
+  revokeSession,
+  type SessionUser,
+  type UserRow
+} from './repo';
 
 export const SESSION_COOKIE = 'sl_session';
 
@@ -61,10 +71,33 @@ export const cookieBase = {
 
 const SESSION_MAX_AGE = 7 * 24 * 3600;
 
+const MIN_SIGNUP_PASSWORD_LENGTH = 8;
+
 const Credentials = type({
   email: 'string.email',
   password: 'string'
 });
+
+const SignupBody = type({
+  email: 'string.email',
+  password: 'string',
+  inviteCode: 'string'
+});
+
+async function issueSession(db: Client, user: UserRow, status = 200): Promise<NextResponse> {
+  const token = await createSession(db, user.id);
+  const res = NextResponse.json(
+    {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      hasPersonalKey: user.llmKeyEncrypted != null
+    },
+    { status }
+  );
+  res.cookies.set({ ...cookieBase, value: token, maxAge: SESSION_MAX_AGE });
+  return res;
+}
 
 export async function login(db: Client, req: Request): Promise<NextResponse> {
   let parsedBody: unknown;
@@ -89,15 +122,67 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: 'account disabled' }, { status: 403 });
   }
 
-  const token = await createSession(db, user.id);
-  const res = NextResponse.json({
-    id: user.id,
-    email: user.email,
-    role: user.role,
-    hasPersonalKey: user.llmKeyEncrypted != null
-  });
-  res.cookies.set({ ...cookieBase, value: token, maxAge: SESSION_MAX_AGE });
-  return res;
+  return issueSession(db, user);
+}
+
+export async function signup(
+  db: Client,
+  req: Request,
+  inviteCode = process.env.SIGNUP_INVITE_CODE
+): Promise<NextResponse> {
+  const gate = rateLimit(`signup:${clientIp(req)}`);
+  if (!gate.allowed) {
+    const res = NextResponse.json(
+      { error: 'too many attempts — try again later' },
+      { status: 429 }
+    );
+    res.headers.set('retry-after', String(gate.retryAfterSeconds));
+    return res;
+  }
+
+  if (!inviteCode) {
+    return NextResponse.json({ error: 'signup is closed' }, { status: 503 });
+  }
+
+  let parsedBody: unknown;
+  try {
+    parsedBody = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
+  }
+
+  const body = SignupBody(parsedBody);
+  if (body instanceof type.errors) {
+    return NextResponse.json(
+      { error: 'email, password and invite code required' },
+      { status: 400 }
+    );
+  }
+
+  if (!verifySecret(body.inviteCode, inviteCode)) {
+    return NextResponse.json({ error: 'invalid invite code' }, { status: 403 });
+  }
+
+  if (body.password.length < MIN_SIGNUP_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `password requires at least ${MIN_SIGNUP_PASSWORD_LENGTH} characters` },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const user = await createUser(db, {
+      email: body.email,
+      passwordHash: await hashPassword(body.password),
+      role: 'user'
+    });
+    return issueSession(db, user, 201);
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      return NextResponse.json({ error: 'email already registered' }, { status: 409 });
+    }
+    throw error;
+  }
 }
 
 export async function logout(db: Client, req: Request): Promise<NextResponse> {

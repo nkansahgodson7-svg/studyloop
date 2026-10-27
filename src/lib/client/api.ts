@@ -42,25 +42,3 @@ export interface NotebookView {
   due: number;
 }
 
-export function isDue(card: CardRow, now = Date.now()): boolean {
-  return new Date(card.due).getTime() <= now;
-}
-
-export async function loadNotebookViews(now = Date.now()): Promise<NotebookView[]> {
-  const notebooks = await getJson<Notebook[]>("/api/notebooks");
-  return Promise.all(
-    notebooks.map(async (notebook) => {
-      const [sources, cardsResult] = await Promise.all([
-        getJson<SourceRow[]>(`/api/notebooks/${notebook.id}/sources`),
-        getJson<{ cards: CardRow[] }>(`/api/notebooks/${notebook.id}/cards`)
-      ]);
-      const cards = cardsResult.cards;
-      return {
-        notebook,
-        sources: sources.length,
-        cards: cards.length,
-        due: cards.filter((card) => isDue(card, now)).length
-      };
-    })
-  );
-}
