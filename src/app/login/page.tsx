@@ -43,10 +43,12 @@ export default function LoginPage() {
         body: JSON.stringify({ email: nextEmail, password: nextPassword })
       });
       if (res.ok) {
+        const body = (await res.json().catch(() => null)) as { role?: string } | null;
         const name = nameFromEmail(nextEmail);
         toast(`Welcome back, ${name.split(" ")[0]}`);
         clearSessionCaches();
-        router.replace("/");
+        // Admins land on their dashboard; the app is one tap away from there.
+        router.replace(body?.role === "admin" ? "/admin" : "/");
         return;
       }
       const body = (await res.json().catch(() => null)) as { error?: string } | null;

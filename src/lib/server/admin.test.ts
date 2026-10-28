@@ -8,7 +8,7 @@ import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
 import { createSession, createUser, listUsers, findUserBySession } from './repo';
 import { requireUser } from './auth';
-import { adminCreateUser, adminListUsers, adminSetDisabled } from './admin';
+import { adminCreateUser, adminListUsers, adminSetDisabled, adminStats, type AdminStats } from './admin';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -298,5 +298,74 @@ describe('admin list through API', () => {
     const token = await createSession(db3, user.id);
     expect((await requireUser(db3, await reqWithCookie('http://x', token))).id).toBe(user.id);
     await db3.close();
+  });
+});
+
+describe('admin stats', () => {
+  let db: Client;
+  let adminToken: string;
+  let userToken: string;
+
+  beforeAll(async () => {
+    db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-admstats-')), 'stats.db'));
+    await applySchema(db);
+
+    const admin = await createUser(db, { email: 'stats-admin@test.local', passwordHash: await hashPassword(PASSWORD), role: 'admin' });
+    const learner = await createUser(db, { email: 'stats-user@test.local', passwordHash: await hashPassword(PASSWORD), role: 'user' });
+    adminToken = await createSession(db, admin.id);
+    userToken = await createSession(db, learner.id);
+
+    const notebook = await db.execute({
+      sql: 'INSERT INTO notebooks (user_id, title) VALUES (?, ?)',
+      args: [learner.id, 'Stats notebook']
+    });
+    const notebookId = Number(notebook.lastInsertRowid);
+    await db.execute({
+      sql: 'INSERT INTO sources (notebook_id, kind, title, text) VALUES (?, ?, ?, ?)',
+      args: [notebookId, 'text', 'Source', 'body']
+    });
+    const card = await db.execute({
+      sql: 'INSERT INTO cards (notebook_id, front, back) VALUES (?, ?, ?)',
+      args: [notebookId, 'front', 'back']
+    });
+    const cardId = Number(card.lastInsertRowid);
+    await db.execute({
+      sql: 'INSERT INTO reviews (card_id, due) VALUES (?, ?)',
+      args: [cardId, new Date(Date.now() - 60_000).toISOString()]
+    });
+    await db.execute({ sql: 'INSERT INTO review_log (card_id, rating) VALUES (?, 3)', args: [cardId] });
+    await db.execute({
+      sql: "INSERT INTO chat_messages (notebook_id, role, content) VALUES (?, 'user', 'hello')",
+      args: [notebookId]
+    });
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it('rejects anonymous (401) and non-admin (403) callers', async () => {
+    expect((await adminStats(db, await reqWithCookie('http://x/api/admin/stats', 'not-a-token'))).status).toBe(401);
+    expect((await adminStats(db, await reqWithCookie('http://x/api/admin/stats', userToken))).status).toBe(403);
+  });
+
+  it('returns totals, activity and a gap-free 14-day series without secrets', async () => {
+    const res = await adminStats(db, await reqWithCookie('http://x/api/admin/stats', adminToken));
+    expect(res.status).toBe(200);
+
+    const body = (await res.json()) as AdminStats;
+    expect(body.users).toMatchObject({ total: 2, admins: 1, disabled: 0, newLast7d: 2 });
+    expect(body.content).toMatchObject({ notebooks: 1, sources: 1, cards: 1 });
+    expect(body.activity).toMatchObject({ reviews: 1, dueNow: 1, chatPrompts: 1, activeUsers7d: 1 });
+
+    expect(body.series.signups).toHaveLength(14);
+    expect(body.series.reviews).toHaveLength(14);
+    // Both users signed up today (last bucket); the window still starts empty.
+    expect(body.series.signups[13]!.count).toBe(2);
+    expect(body.series.signups[0]!.count).toBe(0);
+    expect(body.series.signups[0]!.date < body.series.signups[13]!.date).toBe(true);
+    expect(body.series.reviews[13]!.count).toBe(1);
+
+    expect(JSON.stringify(body)).not.toMatch(/password|pw_hash|gsk_/i);
   });
 });

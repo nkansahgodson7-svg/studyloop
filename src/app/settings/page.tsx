@@ -129,6 +129,26 @@ export default function SettingsPage() {
           </button>
         </section>
 
+        {me?.role === "admin" ? (
+          <section className="stack--8">
+            <div className="section-head" style={{ marginBottom: 2 }}>
+              <h2>Admin</h2>
+            </div>
+            <button className="setting-row" type="button" onClick={() => router.push("/admin")}>
+              <span className="setting-row__icon">
+                <Icon name="layers" size={18} />
+              </span>
+              <span className="setting-row__main">
+                <span className="setting-row__title">Admin dashboard</span>
+                <span className="setting-row__sub">Users, signups, and study activity</span>
+              </span>
+              <span className="setting-row__trail">
+                <Icon name="chevron" size={18} />
+              </span>
+            </button>
+          </section>
+        ) : null}
+
         {isDemoAccount ? (
           <section className="stack--8">
             <div className="section-head" style={{ marginBottom: 2 }}>

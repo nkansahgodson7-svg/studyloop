@@ -38,6 +38,7 @@ const TITLES: Array<[RegExp, string]> = [
   [/\/login$/, "Sign in"],
   [/\/signup$/, "Create account"],
   [/\/onboarding$/, "Set up your AI key"],
+  [/\/admin$/, "Admin dashboard"],
   [/\/review\/session/, "Review session"],
   [/\/notebooks\/[^/]+$/, "Notebook"],
   [/\/review$/, "Review"],
