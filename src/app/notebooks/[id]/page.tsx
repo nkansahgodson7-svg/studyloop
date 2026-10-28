@@ -28,7 +28,8 @@ function sourceLabel(kind: string): string {
   return kind === "pdf" ? "PDF" : kind === "youtube" ? "YouTube" : "Note";
 }
 
-function SourceRowView({ source }: { source: NotebookBundle["sources"][number] }) {
+function SourceRowView({ source, notebookId }: { source: NotebookBundle["sources"][number]; notebookId: number }) {
+  const router = useRouter();
   return (
     <div className="row source-row">
       <span className={`row__tile ${sourceTone(source.kind)}`}>
@@ -48,6 +49,22 @@ function SourceRowView({ source }: { source: NotebookBundle["sources"][number] }
           </span>
         </span>
       </span>
+      <button
+        className="icon-btn icon-btn--outline"
+        type="button"
+        aria-label="Delete source"
+        onClick={async () => {
+          if (!confirm("Delete this source?")) return;
+          const res = await fetch(`/api/notebooks/${notebookId}/sources/${source.id}`, { method: "DELETE" });
+          if (res.ok) {
+            router.refresh();
+          } else {
+            alert("Could not delete source");
+          }
+        }}
+      >
+        <Icon name="trash" size={16} />
+      </button>
     </div>
   );
 }
@@ -419,7 +436,7 @@ function OverviewPanelView({
         {bundle.sources.length ? (
           <div className="rows">
             {bundle.sources.map((source) => (
-              <SourceRowView key={source.id} source={source} />
+              <SourceRowView key={source.id} source={source} notebookId={bundle.id} />
             ))}
           </div>
         ) : (
