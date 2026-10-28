@@ -142,6 +142,14 @@ export async function setUserDisabled(db: Client, userId: number, disabled: bool
   }
 }
 
+export async function deleteSource(db: Client, sourceId: number, userId: number): Promise<boolean> {
+  const res = await db.execute({
+    sql: 'DELETE FROM sources WHERE id = ? AND notebook_id IN (SELECT id FROM notebooks WHERE user_id = ?)',
+    args: [sourceId, userId]
+  });
+  return (res.rowsAffected ?? 0) > 0;
+}
+
 export function isUniqueViolation(error: unknown): boolean {
   const code = (error as { code?: string }).code ?? '';
   return code.startsWith('SQLITE_CONSTRAINT') && /\bUNIQUE\b/i.test((error as Error).message ?? '');
