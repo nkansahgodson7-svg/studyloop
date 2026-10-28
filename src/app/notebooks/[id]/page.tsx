@@ -16,6 +16,13 @@ import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 
 type Tab = "overview" | "chat" | "cards";
 
+/**
+ * `bundle === null` alone cannot tell "still fetching" from "no such notebook",
+ * so the screen used to paint the not-found panel for the whole duration of the
+ * bundle request. Track the load explicitly instead.
+ */
+type LoadStatus = "loading" | "ready" | "missing" | "failed";
+
 function sourceTone(kind: string): string {
   return kind === "pdf" ? "tone-butter" : kind === "youtube" ? "tone-sky" : "tone-sage";
 }
@@ -232,20 +239,35 @@ export default function NotebookScreen() {
   const { toast } = useToast();
   const id = Number(params.id);
   const [bundle, setBundle] = useState<NotebookBundle | null>(null);
+  const [status, setStatus] = useState<LoadStatus>("loading");
   const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
   const [generating, setGenerating] = useState(false);
 
   const reload = useCallback(
     async (_silent = false) => {
-      if (!Number.isInteger(id)) return;
+      if (!Number.isInteger(id)) {
+        setStatus("missing");
+        return;
+      }
+      // A silent refresh keeps what is already on screen; only a first load
+      // swaps the page out for the skeleton.
+      if (!_silent) setStatus("loading");
       try {
         const next = await loadNotebook(id);
         setBundle(next);
-      } catch {
+        setStatus("ready");
+      } catch (error) {
+        const code = (error as { status?: number }).status;
+        if (code === 401) {
+          router.replace("/login");
+          return;
+        }
+        if (_silent) return;
         setBundle(null);
+        setStatus(code === 404 ? "missing" : "failed");
       }
     },
-    [id]
+    [id, router]
   );
 
   useEffect(() => {
@@ -366,7 +388,28 @@ export default function NotebookScreen() {
     }
   }
 
+  if (status === "loading") {
+    return (
+      <ScreenSection>
+        <div className="topbar">
+          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+            <Icon name="back" />
+          </button>
+          <span className="topbar__title grow">Notebook</span>
+        </div>
+        <div className="px stack--16" style={{ marginTop: 6 }} role="status" aria-busy="true">
+          <span className="sr-only">Opening notebook…</span>
+          <div className="skeleton" style={{ height: 96 }} />
+          <div className="skeleton" style={{ height: 44 }} />
+          <div className="skeleton" style={{ height: 68 }} />
+          <div className="skeleton" style={{ height: 68 }} />
+        </div>
+      </ScreenSection>
+    );
+  }
+
   if (!bundle) {
+    const missing = status === "missing";
     return (
       <ScreenSection>
         <div className="topbar">
@@ -376,11 +419,19 @@ export default function NotebookScreen() {
         </div>
         <div className="px">
           <div className="empty">
-            <p className="h3">Notebook not found</p>
-            <p className="small">It may have been deleted. Head back to your library.</p>
-            <a className="btn btn--primary btn--sm" href="/library">
-              Open library
-            </a>
+            <p className="h3">{missing ? "Notebook not found" : "Couldn’t open this notebook"}</p>
+            <p className="small">
+              {missing ? "It may have been deleted. Head back to your library." : "Check your connection and try again."}
+            </p>
+            {missing ? (
+              <a className="btn btn--primary btn--sm" href="/library">
+                Open library
+              </a>
+            ) : (
+              <button className="btn btn--primary btn--sm" type="button" onClick={() => void reload()}>
+                Try again
+              </button>
+            )}
           </div>
         </div>
       </ScreenSection>
