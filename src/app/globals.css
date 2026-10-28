@@ -39,11 +39,16 @@
 
 html {
   -webkit-text-size-adjust: 100%;
+  overflow-x: hidden;
+  height: 100%;
+  touch-action: manipulation;
+  overscroll-behavior-y: none;
 }
 
 body {
   margin: 0;
-  min-height: 100dvh;
+  height: 100dvh;
+  overflow-x: hidden;
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
@@ -52,7 +57,9 @@ body {
   font-optical-sizing: auto;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
-  overscroll-behavior: none;
+  overscroll-behavior-y: none;
+  touch-action: manipulation;
+  overflow-y: hidden;
 }
 
 button,
