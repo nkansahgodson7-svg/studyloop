@@ -27,7 +27,7 @@ function nameFromEmail(email: string): string {
 export default function HomePage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { views, openCreateSheet } = useNotebookList();
+  const { views, openCreateSheet, creating } = useNotebookList();
   const [summary, setSummary] = useState(() => summaryCache.get());
   const [me, setMe] = useState(() => meCache.get());
 
@@ -118,8 +118,8 @@ export default function HomePage() {
         <section>
           <div className="section-head">
             <h2>Your notebooks</h2>
-            <button className="btn btn--ghost btn--sm" type="button" onClick={openCreateSheet}>
-              <Icon name="plus" size={15} /> New
+            <button className="btn btn--ghost btn--sm" type="button" onClick={openCreateSheet} disabled={creating} aria-busy={creating}>
+              <Icon name="plus" size={15} /> {creating ? "Creating…" : "New"}
             </button>
           </div>
           {views === null ? (
@@ -129,8 +129,8 @@ export default function HomePage() {
               <Icon name="layers" size={26} />
               <p className="h3">No notebooks yet</p>
               <p className="small">Create one per course, then add a PDF, a paste, or a lecture link.</p>
-              <button className="btn btn--primary btn--sm" type="button" onClick={openCreateSheet}>
-                <Icon name="plus" size={15} /> New notebook
+              <button className="btn btn--primary btn--sm" type="button" onClick={openCreateSheet} disabled={creating} aria-busy={creating}>
+                <Icon name="plus" size={15} /> {creating ? "Creating…" : "New notebook"}
               </button>
             </div>
           ) : (

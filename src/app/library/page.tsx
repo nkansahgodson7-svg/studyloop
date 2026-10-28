@@ -7,7 +7,7 @@ import { Icon, TONES, plural } from "@/components/ui/icons";
 import { useNotebookList } from "@/lib/client/useNotebooks";
 
 export default function LibraryPage() {
-  const { views, openCreateSheet } = useNotebookList();
+  const { views, openCreateSheet, creating } = useNotebookList();
   const rows = views ?? [];
 
   return (
@@ -20,7 +20,7 @@ export default function LibraryPage() {
           <h1 className="h1">Library</h1>
         </div>
         <div className="greet__actions">
-          <button className="icon-btn icon-btn--outline" type="button" onClick={openCreateSheet} aria-label="New notebook">
+          <button className="icon-btn icon-btn--outline" type="button" onClick={openCreateSheet} disabled={creating} aria-busy={creating} aria-label={creating ? "Creating notebook" : "New notebook"}>
             <Icon name="plus" />
           </button>
         </div>
@@ -38,8 +38,8 @@ export default function LibraryPage() {
                 <Icon name="layers" size={26} />
                 <p className="h3">No notebooks yet</p>
                 <p className="small">Create one per course, then add a PDF, a paste, or a lecture link.</p>
-                <button className="btn btn--primary btn--sm" type="button" onClick={openCreateSheet}>
-                  <Icon name="plus" size={15} /> New notebook
+                <button className="btn btn--primary btn--sm" type="button" onClick={openCreateSheet} disabled={creating} aria-busy={creating}>
+                  <Icon name="plus" size={15} /> {creating ? "Creating…" : "New notebook"}
                 </button>
               </div>
             ) : (
