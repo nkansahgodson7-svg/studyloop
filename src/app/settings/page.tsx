@@ -9,6 +9,7 @@ import { useSheet } from "@/components/ui/Sheet";
 import { SheetFrame } from "@/components/ui/Sheet";
 import { Icon, initialsOf } from "@/components/ui/icons";
 import { clearSessionCaches, meCache, summaryCache, notebookViewsCache } from "@/lib/client/cache";
+import { DEMO_EMAIL } from "@/lib/client/demo";
 
 export default function SettingsPage() {
   const { toast } = useToast();
@@ -79,6 +80,9 @@ export default function SettingsPage() {
 
   const name = me?.email?.split("@")[0] || "Learner";
   const hasKey = Boolean(me?.hasPersonalKey);
+  // Demo-only affordance: reset replaces every notebook with the seeded set,
+  // which would wipe a real account's work.
+  const isDemoAccount = (me?.email ?? "").toLowerCase() === DEMO_EMAIL;
 
   function openKeySheet() {
     open(<KeySheet hasKey={hasKey} onSaved={() => void reloadMe()} />);
@@ -125,46 +129,48 @@ export default function SettingsPage() {
           </button>
         </section>
 
-        <section className="stack--8">
-          <div className="section-head" style={{ marginBottom: 2 }}>
-            <h2>Data</h2>
-          </div>
-          <button
-            className="setting-row"
-            type="button"
-            disabled={resetting}
-            aria-busy={resetting}
-            onClick={async () => {
-              setResetting(true);
-              try {
-                const res = await fetch("/api/me/reset-demo", { method: "POST" });
-                if (res.ok) {
-                  toast("Demo data restored");
-                  clearSessionCaches();
-                  notebookViewsCache.invalidate();
-                  void reloadAll();
-                } else {
-                  toast("Could not reset demo data");
+        {isDemoAccount ? (
+          <section className="stack--8">
+            <div className="section-head" style={{ marginBottom: 2 }}>
+              <h2>Data</h2>
+            </div>
+            <button
+              className="setting-row"
+              type="button"
+              disabled={resetting}
+              aria-busy={resetting}
+              onClick={async () => {
+                setResetting(true);
+                try {
+                  const res = await fetch("/api/me/reset-demo", { method: "POST" });
+                  if (res.ok) {
+                    toast("Demo data restored");
+                    clearSessionCaches();
+                    notebookViewsCache.invalidate();
+                    void reloadAll();
+                  } else {
+                    toast("Could not reset demo data");
+                  }
+                } finally {
+                  setResetting(false);
                 }
-              } finally {
-                setResetting(false);
-              }
-            }}
-          >
-            <span className="setting-row__icon">
-              <Icon name="rotate" size={18} />
-            </span>
-            <span className="setting-row__main">
-              <span className="setting-row__title">Reset demo data</span>
-              <span className="setting-row__sub">
-                {resetting ? "Restoring…" : "Restore the three seeded notebooks"}
+              }}
+            >
+              <span className="setting-row__icon">
+                <Icon name="rotate" size={18} />
               </span>
-            </span>
-            <span className="setting-row__trail">
-              <Icon name="chevron" size={18} />
-            </span>
-          </button>
-        </section>
+              <span className="setting-row__main">
+                <span className="setting-row__title">Reset demo data</span>
+                <span className="setting-row__sub">
+                  {resetting ? "Restoring…" : "Restore the three seeded notebooks"}
+                </span>
+              </span>
+              <span className="setting-row__trail">
+                <Icon name="chevron" size={18} />
+              </span>
+            </button>
+          </section>
+        ) : null}
 
         <button
           className="btn btn--danger btn--block"

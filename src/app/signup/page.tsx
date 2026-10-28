@@ -56,7 +56,8 @@ export default function SignupPage() {
       if (res.ok) {
         toast("Welcome to StudyLoop");
         clearSessionCaches();
-        router.replace("/");
+        // Straight into key setup: chat and card generation need it.
+        router.replace("/onboarding");
         return;
       }
       const body = (await res.json().catch(() => null)) as { error?: string } | null;
