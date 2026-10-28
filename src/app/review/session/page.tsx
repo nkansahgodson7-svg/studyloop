@@ -535,7 +535,7 @@ function ReviewSession() {
         </>
       ) : (
         <p className="tiny muted center" style={{ padding: "0 20px calc(20px + env(safe-area-inset-bottom))" }}>
-          Tap card or press Space
+          Tap the card to reveal
         </p>
       )}
     </ScreenSection>

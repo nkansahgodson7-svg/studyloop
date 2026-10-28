@@ -24,13 +24,25 @@ export default function ChatPanel({
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const stickRef = useRef(true);
 
   useEffect(() => {
     setMessages(bundle.messages);
   }, [bundle.messages]);
 
   useEffect(() => {
-    if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    const screen = logRef.current?.closest<HTMLElement>(".screen");
+    if (!screen) return;
+    const onScroll = () => {
+      stickRef.current = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 120;
+    };
+    screen.addEventListener("scroll", onScroll, { passive: true });
+    return () => screen.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    const screen = logRef.current?.closest<HTMLElement>(".screen");
+    if (screen && stickRef.current && messages.length > 0) screen.scrollTop = screen.scrollHeight;
   }, [messages]);
 
   async function send(text: string) {
@@ -52,6 +64,7 @@ export default function ChatPanel({
       citations: [],
       createdAt: new Date().toISOString()
     };
+    stickRef.current = true;
     setMessages((prev) => [...prev, userMsg, pending]);
 
     const updatePending = (patch: Partial<NotebookChatMessage>) => {

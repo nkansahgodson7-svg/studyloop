@@ -88,7 +88,7 @@ export default function ReviewPage() {
                     <span className="row__main">
                       <span className="row__title">{view.notebook.title}</span>
                       <span className="row__meta">
-                        {plural(view.cards, "card")} · {plural(view.due, "card")} due
+                        {plural(view.cards, "card")}
                       </span>
                     </span>
                     <span className="row__trail">

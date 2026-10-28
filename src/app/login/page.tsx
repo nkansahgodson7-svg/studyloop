@@ -103,7 +103,7 @@ export default function LoginPage() {
               name="password"
               type="password"
               autoComplete="current-password"
-              placeholder="At least 6 characters"
+              placeholder="Your password"
               required
               minLength={6}
               value={password}

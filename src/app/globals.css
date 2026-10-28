@@ -62,7 +62,8 @@ textarea {
   color: inherit;
 }
 
-button {
+button,
+a {
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -139,6 +140,7 @@ svg {
   overflow-x: hidden;
   overscroll-behavior: contain;
   background: var(--paper);
+  padding-top: env(safe-area-inset-top);
   padding-bottom: calc(26px + env(safe-area-inset-bottom));
   scrollbar-width: none;
 }
@@ -730,6 +732,62 @@ svg {
   line-height: 1.4;
 }
 
+.file-picker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 11px 12px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  cursor: pointer;
+}
+
+.file-picker:focus-within {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px var(--brand);
+}
+
+.file-picker__icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 12px;
+  background: var(--butter);
+}
+
+.file-picker__main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.file-picker__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14.5px;
+  font-weight: 550;
+  line-height: 1.3;
+}
+
+.file-picker__sub {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.file-picker__action {
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--brand);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
 .section-head {
   display: flex;
   align-items: baseline;
@@ -959,6 +1017,7 @@ svg {
 
 .greet .h1 {
   margin-top: 3px;
+  font-size: clamp(23px, 7.4vw, 30px);
 }
 
 .greet__actions {
@@ -1054,6 +1113,13 @@ svg {
 .source-row .row__tile svg {
   width: 21px;
   height: 21px;
+}
+
+.source-row .row__title {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
 }
 
 .source-row__sub {
@@ -1277,9 +1343,10 @@ svg {
 .card-row__back {
   font-size: 12.5px;
   color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .card-row__state {
@@ -1376,6 +1443,11 @@ svg {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-width: none;
+}
+
+.flash-wrap::-webkit-scrollbar {
+  display: none;
 }
 
 .flash {
@@ -1832,6 +1904,7 @@ svg {
   display: grid;
   place-items: center;
   gap: 3px;
+  padding-bottom: 6px;
   border: 0;
   border-radius: var(--r-pill);
   background: transparent;
@@ -1848,9 +1921,9 @@ svg {
 }
 
 .tabbar__item span {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 550;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
   line-height: 1;
 }
 
@@ -1862,7 +1935,7 @@ svg {
 .tabbar__item.is-active::after {
   content: "";
   position: absolute;
-  bottom: 5px;
+  bottom: 2px;
   width: 4px;
   height: 4px;
   border-radius: 50%;
@@ -2085,6 +2158,41 @@ svg {
   }
 }
 
+@media (pointer: coarse) {
+  .btn--sm {
+    min-height: 44px;
+  }
+
+  .segmented button {
+    height: 44px;
+  }
+
+  .suggest button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .auth__switch a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-inline: 4px;
+    margin-inline: -4px;
+  }
+
+  .input,
+  .textarea,
+  .composer input {
+    font-size: 16px;
+  }
+
+  .composer .icon-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 @media (min-width: 720px) {
   body {
     display: grid;
@@ -2117,6 +2225,38 @@ svg {
   }
 }
 
+@media (max-height: 640px) {
+  .flash-wrap {
+    padding: 10px 20px;
+  }
+
+  .sheet__head {
+    margin-bottom: 10px;
+  }
+
+  .sheet__body {
+    gap: 10px;
+  }
+
+  .sheet__foot {
+    padding-top: 10px;
+  }
+
+  .flash {
+    min-height: 260px;
+    gap: 14px;
+    padding: 22px 20px;
+  }
+
+  .flash__prompt {
+    font-size: 23px;
+  }
+
+  .grades {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+}
+
 @media (max-width: 360px) {
   .px {
     padding-inline: 16px;
@@ -2124,6 +2264,52 @@ svg {
 
   .greet {
     padding-inline: 16px;
+  }
+
+  .hero {
+    padding: 18px 16px;
+  }
+
+  .hero__row {
+    gap: 12px;
+  }
+
+  .hero__title {
+    font-size: 22px;
+  }
+
+  .hero .ring {
+    width: 82px !important;
+    height: 82px !important;
+  }
+
+  .hero__foot {
+    margin-top: 14px;
+  }
+
+  .kind-list {
+    gap: 6px;
+  }
+
+  .kind {
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 14px;
+  }
+
+  .kind__tile {
+    width: 36px;
+    height: 36px;
+  }
+
+  .sheet-panel .field {
+    gap: 4px;
+  }
+
+  .kind__sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

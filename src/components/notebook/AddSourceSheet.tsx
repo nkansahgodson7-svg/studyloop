@@ -108,20 +108,29 @@ export default function AddSourceSheetContent({
     pdf: (
       <>
         <div className="field">
-          <label className="label" htmlFor="pdfFile">
-            PDF file
+          <span className="label">PDF file</span>
+          <label className="file-picker" htmlFor="pdfFile">
+            <span className="file-picker__icon">
+              <Icon name="file" size={20} />
+            </span>
+            <span className="file-picker__main">
+              <span className="file-picker__title">{fileName ?? "Choose a PDF"}</span>
+              <span className="file-picker__sub">
+                {fileName ? "Tap to replace" : "Up to 100 pages · 40 MB"}
+              </span>
+            </span>
+            <span className="file-picker__action">{fileName ? "Change" : "Browse"}</span>
+            <input
+              className="sr-only"
+              id="pdfFile"
+              name="file"
+              type="file"
+              accept="application/pdf,.pdf"
+              aria-label="PDF file"
+              onChange={(event) => setFileName(event.target.files?.[0]?.name ?? null)}
+            />
           </label>
-          <input
-            className="input"
-            id="pdfFile"
-            name="file"
-            type="file"
-            accept="application/pdf,.pdf"
-            style={{ padding: 10 }}
-            onChange={(event) => setFileName(event.target.files?.[0]?.name ?? null)}
-          />
         </div>
-        <p className="hint">{fileName ?? "No file selected · up to 100 pages, 40 MB"}</p>
       </>
     ),
     text: (
@@ -168,7 +177,11 @@ export default function AddSourceSheetContent({
                 className={`kind ${kind === meta.kind ? "is-selected" : ""}`}
                 type="button"
                 aria-pressed={kind === meta.kind}
-                onClick={() => setKind(meta.kind)}
+                onClick={() => {
+                  setKind(meta.kind);
+                  setError(null);
+                  if (meta.kind !== "pdf") setFileName(null);
+                }}
               >
                 <span className={`kind__tile ${meta.tone}`}>
                   <Icon name={meta.glyph} size={19} />
@@ -198,7 +211,12 @@ export default function AddSourceSheetContent({
       }
       foot={
         <>
-          <button className="btn btn--primary btn--block" type="submit" form="addSourceForm" disabled={busy}>
+          <button
+            className="btn btn--primary btn--block"
+            type="submit"
+            form="addSourceForm"
+            disabled={busy || (kind === "pdf" && !fileName)}
+          >
             {busy ? "Working…" : kind === "pdf" ? "Add PDF" : kind === "youtube" ? "Add transcript" : "Save source"}
           </button>
           <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>

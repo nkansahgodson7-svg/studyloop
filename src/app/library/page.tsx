@@ -55,7 +55,6 @@ export default function LibraryPage() {
                       <span className="row__title">{notebook.title}</span>
                       <span className="row__meta">
                         {plural(view.sources, "source")} · {plural(view.cards, "card")}
-                        {view.due ? ` · ${view.due} due` : ""}
                       </span>
                     </span>
                     <span className="row__trail">
