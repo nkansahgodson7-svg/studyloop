@@ -17,6 +17,9 @@ export default function SettingsPage() {
   const [me, setMe] = useState(() => meCache.get());
   const [summary, setSummary] = useState(() => summaryCache.get());
   const [unauthorized, setUnauthorized] = useState(false);
+  const [savingKey, setSavingKey] = useState(false);
+  const [removingKey, setRemovingKey] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -87,19 +90,24 @@ export default function SettingsPage() {
         onSubmit={async (data: FormData) => {
           const key = String(data.get("key") ?? "").trim();
           if (!key) return;
-          const res = await fetch("/api/me/key", {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ key })
-          });
-          if (res.status === 201) {
-            close();
-            toast("Personal key saved");
-            void reloadMe();
-            return;
+          setSavingKey(true);
+          try {
+            const res = await fetch("/api/me/key", {
+              method: "PUT",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ key })
+            });
+            if (res.status === 201) {
+              close();
+              toast("Personal key saved");
+              void reloadMe();
+              return;
+            }
+            const body = (await res.json().catch(() => null)) as { error?: string } | null;
+            toast(body?.error ?? "Could not save key");
+          } finally {
+            setSavingKey(false);
           }
-          const body = (await res.json().catch(() => null)) as { error?: string } | null;
-          toast(body?.error ?? "Could not save key");
         }}
         body={
           <>
@@ -122,25 +130,32 @@ export default function SettingsPage() {
         }
         foot={
           <>
-            <button className="btn btn--primary btn--block" type="submit" form="keyForm">
-              Save key
+            <button className="btn btn--primary btn--block" type="submit" form="keyForm" disabled={savingKey} aria-busy={savingKey}>
+              {savingKey ? "Saving…" : "Save key"}
             </button>
             {hasKey ? (
               <button
                 className="btn btn--danger btn--block"
                 type="button"
+                disabled={removingKey}
+                aria-busy={removingKey}
                 onClick={async () => {
-                  const res = await fetch("/api/me/key", { method: "DELETE" });
-                  if (res.ok) {
-                    close();
-                    toast("Personal key removed");
-                    void reloadMe();
-                    return;
+                  setRemovingKey(true);
+                  try {
+                    const res = await fetch("/api/me/key", { method: "DELETE" });
+                    if (res.ok) {
+                      close();
+                      toast("Personal key removed");
+                      void reloadMe();
+                      return;
+                    }
+                    toast("Could not remove key");
+                  } finally {
+                    setRemovingKey(false);
                   }
-                  toast("Could not remove key");
                 }}
               >
-                Remove personal key
+                {removingKey ? "Removing…" : "Remove personal key"}
               </button>
             ) : null}
             <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>
@@ -200,15 +215,22 @@ export default function SettingsPage() {
           <button
             className="setting-row"
             type="button"
+            disabled={resetting}
+            aria-busy={resetting}
             onClick={async () => {
-              const res = await fetch("/api/me/reset-demo", { method: "POST" });
-              if (res.ok) {
-                toast("Demo data restored");
-                clearSessionCaches();
-                notebookViewsCache.invalidate();
-                void reloadAll();
-              } else {
-                toast("Could not reset demo data");
+              setResetting(true);
+              try {
+                const res = await fetch("/api/me/reset-demo", { method: "POST" });
+                if (res.ok) {
+                  toast("Demo data restored");
+                  clearSessionCaches();
+                  notebookViewsCache.invalidate();
+                  void reloadAll();
+                } else {
+                  toast("Could not reset demo data");
+                }
+              } finally {
+                setResetting(false);
               }
             }}
           >

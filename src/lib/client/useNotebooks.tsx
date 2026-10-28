@@ -104,8 +104,8 @@ export function useNotebookList() {
           </>
         }
         foot={
-          <button className="btn btn--primary btn--block" type="submit" form="newNotebookForm" disabled={creating}>
-            Create notebook
+          <button className="btn btn--primary btn--block" type="submit" form="newNotebookForm" disabled={creating} aria-busy={creating}>
+            {creating ? "Creating…" : "Create notebook"}
           </button>
         }
       />

@@ -9,9 +9,10 @@ export default function GenerateCardsSheetContent({
   onConfirm
 }: {
   sources: NotebookSource[];
-  onConfirm: (sourceIds: number[]) => void;
+  onConfirm: (sourceIds: number[]) => void | Promise<void>;
 }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set(sources.map((source) => source.id)));
+  const [submitting, setSubmitting] = useState(false);
 
   function toggle(id: number, checked: boolean) {
     setSelected((prev) => {
@@ -27,7 +28,14 @@ export default function GenerateCardsSheetContent({
       title="Generate cards"
       sub="Choose sources to draw from."
       formId="generateSourceForm"
-      onSubmit={() => void onConfirm([...selected])}
+      onSubmit={async () => {
+        setSubmitting(true);
+        try {
+          await onConfirm([...selected]);
+        } finally {
+          setSubmitting(false);
+        }
+      }}
       body={
         <div className="stack gap-2">
           {sources.map((source) => (
@@ -45,8 +53,8 @@ export default function GenerateCardsSheetContent({
         </div>
       }
       foot={
-        <button className="btn btn--primary btn--block" type="submit" form="generateSourceForm">
-          Generate
+        <button className="btn btn--primary btn--block" type="submit" form="generateSourceForm" disabled={submitting} aria-busy={submitting}>
+          {submitting ? "Generating…" : "Generate"}
         </button>
       }
     />
