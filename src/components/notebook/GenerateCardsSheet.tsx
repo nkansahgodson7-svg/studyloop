@@ -54,7 +54,13 @@ export default function GenerateCardsSheetContent({
       }
       foot={
         <button className="btn btn--primary btn--block" type="submit" form="generateSourceForm" disabled={submitting} aria-busy={submitting}>
-          {submitting ? "Generating…" : "Generate"}
+          {submitting ? (
+            <>
+              <span className="spinner" /> Generating…
+            </>
+          ) : (
+            "Generate"
+          )}
         </button>
       }
     />

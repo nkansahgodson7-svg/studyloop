@@ -216,8 +216,19 @@ export default function AddSourceSheetContent({
             type="submit"
             form="addSourceForm"
             disabled={busy || (kind === "pdf" && !fileName)}
+            aria-busy={busy}
           >
-            {busy ? "Working…" : kind === "pdf" ? "Add PDF" : kind === "youtube" ? "Add transcript" : "Save source"}
+            {busy ? (
+              <>
+                <span className="spinner" /> Working…
+              </>
+            ) : kind === "pdf" ? (
+              "Add PDF"
+            ) : kind === "youtube" ? (
+              "Add transcript"
+            ) : (
+              "Save source"
+            )}
           </button>
           <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>
             Cancel

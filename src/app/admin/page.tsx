@@ -18,6 +18,8 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   const loadUsers = useCallback(async () => {
     const res = await fetch('/api/admin/users');
@@ -38,39 +40,55 @@ export default function AdminPage() {
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (creatingUser) return;
     setError(null);
     setNotice(null);
-    const res = await fetch('/api/admin/users', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password, role })
-    });
-    if (res.status === 201) {
-      setNotice(`Created ${email}`);
-      setEmail('');
-      setPassword('');
-      await loadUsers();
-      return;
+    setCreatingUser(true);
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, role })
+      });
+      if (res.status === 201) {
+        setNotice(`Created ${email}`);
+        setEmail('');
+        setPassword('');
+        await loadUsers();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setError(body?.error ?? `Create failed (${res.status})`);
+    } catch {
+      setError('Network error — try again');
+    } finally {
+      setCreatingUser(false);
     }
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    setError(body?.error ?? `Create failed (${res.status})`);
   }
 
   async function toggleDisabled(user: AdminUserRow) {
+    if (togglingId !== null) return;
     setError(null);
     setNotice(null);
-    const res = await fetch(`/api/admin/users/${user.id}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ disabled: !user.disabled })
-    });
-    if (res.ok) {
-      setNotice(`${user.email} ${user.disabled ? 'enabled' : 'disabled'}`);
-      await loadUsers();
-      return;
+    setTogglingId(user.id);
+    try {
+      const res = await fetch(`/api/admin/users/${user.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ disabled: !user.disabled })
+      });
+      if (res.ok) {
+        setNotice(`${user.email} ${user.disabled ? 'enabled' : 'disabled'}`);
+        await loadUsers();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      setError(body?.error ?? `Update failed (${res.status})`);
+    } catch {
+      setError('Network error — try again');
+    } finally {
+      setTogglingId(null);
     }
-    const body = (await res.json().catch(() => null)) as { error?: string } | null;
-    setError(body?.error ?? `Update failed (${res.status})`);
   }
 
   if (forbidden) {
@@ -113,7 +131,9 @@ export default function AdminPage() {
           <option value="user">user</option>
           <option value="admin">admin</option>
         </select>
-        <button type="submit">Create user</button>
+        <button type="submit" disabled={creatingUser} aria-busy={creatingUser}>
+          {creatingUser ? 'Creating…' : 'Create user'}
+        </button>
       </form>
 
       <table>
@@ -133,8 +153,13 @@ export default function AdminPage() {
               <td>{user.role}</td>
               <td>{user.disabled ? 'disabled' : 'active'}</td>
               <td>
-                <button type="button" onClick={() => void toggleDisabled(user)}>
-                  {user.disabled ? 'Enable' : 'Disable'}
+                <button
+                  type="button"
+                  disabled={togglingId === user.id}
+                  aria-busy={togglingId === user.id}
+                  onClick={() => void toggleDisabled(user)}
+                >
+                  {togglingId === user.id ? '…' : user.disabled ? 'Enable' : 'Disable'}
                 </button>
               </td>
             </tr>

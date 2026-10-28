@@ -113,8 +113,20 @@ export default function LoginPage() {
           <p className="form-error" role="alert" hidden={error === null}>
             {error ?? ""}
           </p>
-          <button className="btn btn--primary btn--block" type="submit" id="loginBtn" disabled={submitting}>
-            {submitting ? "Signing in…" : "Sign in"}
+          <button
+            className="btn btn--primary btn--block"
+            type="submit"
+            id="loginBtn"
+            disabled={submitting}
+            aria-busy={submitting}
+          >
+            {submitting ? (
+              <>
+                <span className="spinner" /> Signing in…
+              </>
+            ) : (
+              "Sign in"
+            )}
           </button>
         </form>
         <p className="auth__switch">

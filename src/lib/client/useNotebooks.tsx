@@ -40,7 +40,7 @@ export function useNotebookList() {
   }, [router, toast]);
 
   const create = useCallback(
-    async (title: string) => {
+    async (title: string): Promise<string | null> => {
       setCreating(true);
       try {
         const notebook = await getJson<{ id: number; title?: string }>("/api/notebooks", {
@@ -65,8 +65,13 @@ export function useNotebookList() {
         closeSheet();
         toast("Notebook created");
         router.push(`/notebooks/${notebook.id}`);
-      } catch {
-        toast("Could not create notebook");
+        return null;
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+        // The sheet surfaces this inline; it stays visible after any toast.
+        return status === 401
+          ? "Your session expired — sign in again."
+          : "Could not create notebook. Check your connection and try again.";
       } finally {
         setCreating(false);
       }
@@ -75,42 +80,78 @@ export function useNotebookList() {
   );
 
   const openCreateSheet = useCallback(() => {
-    openSheet(
-      <SheetFrame
-        title="New notebook"
-        sub="One notebook per course works best."
-        formId="newNotebookForm"
-        onSubmit={(data) => {
-          const title = (data.get("title") ?? "").toString().trim();
-          if (title) void create(title);
-        }}
-        body={
-          <>
-            <div className="field">
-              <label className="label" htmlFor="nbTitle">
-                Notebook title
-              </label>
-              <input
-                className="input"
-                id="nbTitle"
-                name="title"
-                type="text"
-                maxLength={120}
-                placeholder="e.g. Organic Chemistry"
-                required
-              />
-            </div>
-            <p className="hint">You can add PDFs, pasted notes, and lecture links once it exists.</p>
-          </>
-        }
-        foot={
-          <button className="btn btn--primary btn--block" type="submit" form="newNotebookForm" disabled={creating} aria-busy={creating}>
-            {creating ? "Creating…" : "Create notebook"}
-          </button>
-        }
-      />
-    );
-  }, [create, creating, openSheet]);
+    openSheet(<NewNotebookSheetContent create={create} />);
+  }, [create, openSheet]);
 
   return { views, creating, create, openCreateSheet };
+}
+
+/**
+ * Self-contained sheet. The sheet stores a snapshot of the node it was opened
+ * with, so any loading state has to live in a component of its own for the
+ * submit button to actually flip to its spinner/disabled state.
+ */
+function NewNotebookSheetContent({ create }: { create: (title: string) => Promise<string | null> }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <SheetFrame
+      title="New notebook"
+      sub="One notebook per course works best."
+      formId="newNotebookForm"
+      onSubmit={(data) => {
+        if (submitting) return;
+        const title = (data.get("title") ?? "").toString().trim();
+        if (!title) return;
+        setError(null);
+        setSubmitting(true);
+        void create(title)
+          .then((message) => setError(message))
+          .finally(() => setSubmitting(false));
+      }}
+      body={
+        <>
+          <div className="field">
+            <label className="label" htmlFor="nbTitle">
+              Notebook title
+            </label>
+            <input
+              className="input"
+              id="nbTitle"
+              name="title"
+              type="text"
+              maxLength={120}
+              placeholder="e.g. Organic Chemistry"
+              required
+              disabled={submitting}
+            />
+          </div>
+          <p className="hint">You can add PDFs, pasted notes, and lecture links once it exists.</p>
+          {error ? (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </>
+      }
+      foot={
+        <button
+          className="btn btn--primary btn--block"
+          type="submit"
+          form="newNotebookForm"
+          disabled={submitting}
+          aria-busy={submitting}
+        >
+          {submitting ? (
+            <>
+              <span className="spinner" /> Creating…
+            </>
+          ) : (
+            "Create notebook"
+          )}
+        </button>
+      }
+    />
+  );
 }

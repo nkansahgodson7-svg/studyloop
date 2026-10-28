@@ -134,8 +134,14 @@ export default function SignupPage() {
           <p className="form-error" role="alert" hidden={error === null}>
             {error ?? ""}
           </p>
-          <button className="btn btn--primary btn--block" type="submit" disabled={submitting}>
-            {submitting ? "Creating account…" : "Create account"}
+          <button className="btn btn--primary btn--block" type="submit" disabled={submitting} aria-busy={submitting}>
+            {submitting ? (
+              <>
+                <span className="spinner" /> Creating account…
+              </>
+            ) : (
+              "Create account"
+            )}
           </button>
         </form>
         <p className="auth__switch">

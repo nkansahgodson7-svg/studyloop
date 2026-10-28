@@ -28,8 +28,78 @@ function sourceLabel(kind: string): string {
   return kind === "pdf" ? "PDF" : kind === "youtube" ? "YouTube" : "Note";
 }
 
-function SourceRowView({ source, notebookId }: { source: NotebookBundle["sources"][number]; notebookId: number }) {
-  const router = useRouter();
+/**
+ * Owns its busy state: the sheet keeps a snapshot of the node it was opened
+ * with, so the confirm button has to re-render itself to show progress.
+ */
+function DeleteNotebookSheet({ title, onConfirm }: { title: string; onConfirm: () => Promise<void> }) {
+  const [deleting, setDeleting] = useState(false);
+
+  return (
+    <SheetFrame
+      title="Delete notebook"
+      sub={title}
+      body={
+        <p className="small text-pretty" style={{ color: "var(--ink-2)" }}>
+          This removes its sources, chat history, and flashcards. It cannot be undone.
+        </p>
+      }
+      foot={
+        <button
+          className="btn btn--danger btn--block"
+          type="button"
+          disabled={deleting}
+          aria-busy={deleting}
+          onClick={() => {
+            if (deleting) return;
+            setDeleting(true);
+            void onConfirm().finally(() => setDeleting(false));
+          }}
+        >
+          {deleting ? (
+            <>
+              <span className="spinner" /> Deleting…
+            </>
+          ) : (
+            "Delete notebook"
+          )}
+        </button>
+      }
+    />
+  );
+}
+
+function SourceRowView({
+  source,
+  notebookId,
+  onDelete
+}: {
+  source: NotebookBundle["sources"][number];
+  notebookId: number;
+  onDelete: () => void;
+}) {
+  const { toast } = useToast();
+  const [deleting, setDeleting] = useState(false);
+
+  async function remove() {
+    if (deleting) return;
+    if (!confirm("Delete this source?")) return;
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/notebooks/${notebookId}/sources/${source.id}`, { method: "DELETE" });
+      if (res.ok || res.status === 404) {
+        toast("Source deleted");
+        onDelete();
+      } else {
+        toast("Could not delete source");
+      }
+    } catch {
+      toast("Could not delete source");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <div className="row source-row">
       <span className={`row__tile ${sourceTone(source.kind)}`}>
@@ -52,18 +122,12 @@ function SourceRowView({ source, notebookId }: { source: NotebookBundle["sources
       <button
         className="icon-btn icon-btn--outline"
         type="button"
-        aria-label="Delete source"
-        onClick={async () => {
-          if (!confirm("Delete this source?")) return;
-          const res = await fetch(`/api/notebooks/${notebookId}/sources/${source.id}`, { method: "DELETE" });
-          if (res.ok) {
-            router.refresh();
-          } else {
-            alert("Could not delete source");
-          }
-        }}
+        aria-label={deleting ? "Deleting source" : "Delete source"}
+        aria-busy={deleting}
+        disabled={deleting}
+        onClick={() => void remove()}
       >
-        <Icon name="trash" size={16} />
+        {deleting ? <span className="spinner" /> : <Icon name="trash" size={16} />}
       </button>
     </div>
   );
@@ -188,6 +252,12 @@ export default function NotebookScreen() {
     void reload();
   }, [id, reload]);
 
+  const handleSourceDeleted = useCallback(() => {
+    void reload(true);
+    void notebookViewsCache.load({ force: true }).catch(() => undefined);
+    summaryCache.invalidate();
+  }, [reload]);
+
   function openAddSource() {
     if (!bundle) return;
     sheet.open(<AddSourceSheetContent notebookId={id} notebookTitle={bundle.title} onSuccess={() => {
@@ -215,22 +285,7 @@ export default function NotebookScreen() {
   }
 
   function confirmDelete() {
-    sheet.open(
-      <SheetFrame
-        title="Delete notebook"
-        sub={bundle?.title ?? ""}
-        body={
-          <p className="small text-pretty" style={{ color: "var(--ink-2)" }}>
-            This removes its sources, chat history, and flashcards. It cannot be undone.
-          </p>
-        }
-        foot={
-          <button className="btn btn--danger btn--block" type="button" onClick={() => void performDelete()}>
-            Delete notebook
-          </button>
-        }
-      />
-    );
+    sheet.open(<DeleteNotebookSheet title={bundle?.title ?? ""} onConfirm={performDelete} />);
   }
 
   async function performDelete() {
@@ -384,7 +439,13 @@ export default function NotebookScreen() {
 
       <div className="tabpanel px">
         {tab === "overview" ? (
-          <OverviewPanelView bundle={bundle} due={due} onAdd={openAddSource} onReview={startReview} />
+          <OverviewPanelView
+            bundle={bundle}
+            due={due}
+            onAdd={openAddSource}
+            onReview={startReview}
+            onDeleteSource={handleSourceDeleted}
+          />
         ) : tab === "chat" ? (
           <ChatPanel bundle={bundle} notebookId={id} />
         ) : (
@@ -405,12 +466,14 @@ function OverviewPanelView({
   bundle,
   due,
   onAdd,
-  onReview
+  onReview,
+  onDeleteSource
 }: {
   bundle: NotebookBundle;
   due: number;
   onAdd: () => void;
   onReview: () => void;
+  onDeleteSource: () => void;
 }) {
   return (
     <div className="stack--16">
@@ -436,7 +499,12 @@ function OverviewPanelView({
         {bundle.sources.length ? (
           <div className="rows">
             {bundle.sources.map((source) => (
-              <SourceRowView key={source.id} source={source} notebookId={bundle.id} />
+              <SourceRowView
+                key={source.id}
+                source={source}
+                notebookId={bundle.id}
+                onDelete={onDeleteSource}
+              />
             ))}
           </div>
         ) : (

@@ -17,9 +17,8 @@ export default function SettingsPage() {
   const [me, setMe] = useState(() => meCache.get());
   const [summary, setSummary] = useState(() => summaryCache.get());
   const [unauthorized, setUnauthorized] = useState(false);
-  const [savingKey, setSavingKey] = useState(false);
-  const [removingKey, setRemovingKey] = useState(false);
   const [resetting, setResetting] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -82,89 +81,7 @@ export default function SettingsPage() {
   const hasKey = Boolean(me?.hasPersonalKey);
 
   function openKeySheet() {
-    open(
-      <SheetFrame
-        title="AI key"
-        sub={hasKey ? "A personal key is active" : "Using the workspace key"}
-        formId="keyForm"
-        onSubmit={async (data: FormData) => {
-          const key = String(data.get("key") ?? "").trim();
-          if (!key) return;
-          setSavingKey(true);
-          try {
-            const res = await fetch("/api/me/key", {
-              method: "PUT",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ key })
-            });
-            if (res.status === 201) {
-              close();
-              toast("Personal key saved");
-              void reloadMe();
-              return;
-            }
-            const body = (await res.json().catch(() => null)) as { error?: string } | null;
-            toast(body?.error ?? "Could not save key");
-          } finally {
-            setSavingKey(false);
-          }
-        }}
-        body={
-          <>
-            <div className="field">
-              <label className="label" htmlFor="groqKey">
-                Groq API key
-              </label>
-              <input
-                className="input"
-                id="groqKey"
-                name="key"
-                type="password"
-                autoComplete="off"
-                placeholder="gsk_…"
-                required
-              />
-            </div>
-            <p className="hint">The real app encrypts this server-side with AES-GCM. This mockup only stores a flag locally.</p>
-          </>
-        }
-        foot={
-          <>
-            <button className="btn btn--primary btn--block" type="submit" form="keyForm" disabled={savingKey} aria-busy={savingKey}>
-              {savingKey ? "Saving…" : "Save key"}
-            </button>
-            {hasKey ? (
-              <button
-                className="btn btn--danger btn--block"
-                type="button"
-                disabled={removingKey}
-                aria-busy={removingKey}
-                onClick={async () => {
-                  setRemovingKey(true);
-                  try {
-                    const res = await fetch("/api/me/key", { method: "DELETE" });
-                    if (res.ok) {
-                      close();
-                      toast("Personal key removed");
-                      void reloadMe();
-                      return;
-                    }
-                    toast("Could not remove key");
-                  } finally {
-                    setRemovingKey(false);
-                  }
-                }}
-              >
-                {removingKey ? "Removing…" : "Remove personal key"}
-              </button>
-            ) : null}
-            <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>
-              Cancel
-            </button>
-          </>
-        }
-      />
-    );
+    open(<KeySheet hasKey={hasKey} onSaved={() => void reloadMe()} />);
   }
 
   return (
@@ -239,7 +156,9 @@ export default function SettingsPage() {
             </span>
             <span className="setting-row__main">
               <span className="setting-row__title">Reset demo data</span>
-              <span className="setting-row__sub">Restore the three seeded notebooks</span>
+              <span className="setting-row__sub">
+                {resetting ? "Restoring…" : "Restore the three seeded notebooks"}
+              </span>
             </span>
             <span className="setting-row__trail">
               <Icon name="chevron" size={18} />
@@ -250,16 +169,151 @@ export default function SettingsPage() {
         <button
           className="btn btn--danger btn--block"
           type="button"
+          disabled={signingOut}
+          aria-busy={signingOut}
           onClick={async () => {
-            await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
-            clearSessionCaches();
-            router.push("/login");
+            if (signingOut) return;
+            setSigningOut(true);
+            try {
+              await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+              clearSessionCaches();
+              router.push("/login");
+            } finally {
+              setSigningOut(false);
+            }
           }}
         >
-          <Icon name="logout" size={17} /> Sign out
+          {signingOut ? (
+            <>
+              <span className="spinner" /> Signing out…
+            </>
+          ) : (
+            <>
+              <Icon name="logout" size={17} /> Sign out
+            </>
+          )}
         </button>
         <p className="tiny muted center">StudyLoop mockup · v1.0 · Local storage only</p>
       </div>
     </ScreenSection>
+  );
+}
+
+/**
+ * Self-contained so its Save/Remove buttons can show progress: the sheet keeps
+ * a snapshot of the node it was opened with, so state held by the page never
+ * reaches the button inside the sheet.
+ */
+function KeySheet({ hasKey, onSaved }: { hasKey: boolean; onSaved: () => void }) {
+  const { close } = useSheet();
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const busy = saving || removing;
+
+  async function saveKey(data: FormData) {
+    const key = String(data.get("key") ?? "").trim();
+    if (!key || busy) return;
+    setSaving(true);
+    try {
+      const res = await fetch("/api/me/key", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key })
+      });
+      if (res.status === 201) {
+        close();
+        toast("Personal key saved");
+        onSaved();
+        return;
+      }
+      const body = (await res.json().catch(() => null)) as { error?: string } | null;
+      toast(body?.error ?? "Could not save key");
+    } catch {
+      toast("Network error — try again");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeKey() {
+    if (busy) return;
+    setRemoving(true);
+    try {
+      const res = await fetch("/api/me/key", { method: "DELETE" });
+      if (res.ok) {
+        close();
+        toast("Personal key removed");
+        onSaved();
+        return;
+      }
+      toast("Could not remove key");
+    } catch {
+      toast("Network error — try again");
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <SheetFrame
+      title="AI key"
+      sub={hasKey ? "A personal key is active" : "Using the workspace key"}
+      formId="keyForm"
+      onSubmit={(data) => void saveKey(data)}
+      body={
+        <>
+          <div className="field">
+            <label className="label" htmlFor="groqKey">
+              Groq API key
+            </label>
+            <input
+              className="input"
+              id="groqKey"
+              name="key"
+              type="password"
+              autoComplete="off"
+              placeholder="gsk_…"
+              required
+              disabled={busy}
+            />
+          </div>
+          <p className="hint">The real app encrypts this server-side with AES-GCM. This mockup only stores a flag locally.</p>
+        </>
+      }
+      foot={
+        <>
+          <button className="btn btn--primary btn--block" type="submit" form="keyForm" disabled={busy} aria-busy={saving}>
+            {saving ? (
+              <>
+                <span className="spinner" /> Saving…
+              </>
+            ) : (
+              "Save key"
+            )}
+          </button>
+          {hasKey ? (
+            <button
+              className="btn btn--danger btn--block"
+              type="button"
+              disabled={busy}
+              aria-busy={removing}
+              onClick={() => void removeKey()}
+            >
+              {removing ? (
+                <>
+                  <span className="spinner" /> Removing…
+                </>
+              ) : (
+                "Remove personal key"
+              )}
+            </button>
+          ) : null}
+          <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>
+            Cancel
+          </button>
+        </>
+      }
+    />
   );
 }
