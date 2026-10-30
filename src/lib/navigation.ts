@@ -37,6 +37,7 @@ export function directionFor(prev: string, next: string): NavDirection {
 const TITLES: Array<[RegExp, string]> = [
   [/\/login$/, "Sign in"],
   [/\/signup$/, "Create account"],
+  [/\/account-disabled$/, "Account disabled"],
   [/\/onboarding$/, "Set up your AI key"],
   [/\/admin$/, "Admin dashboard"],
   [/\/review\/session/, "Review session"],

@@ -18,6 +18,7 @@ export interface SessionUser {
   email: string;
   role: UserRole;
   hasPersonalKey: boolean;
+  disabled: boolean;
 }
 
 export const SESSION_TTL_DAYS = 7;
@@ -86,11 +87,13 @@ export async function createSession(db: Client, userId: number): Promise<string>
 }
 
 export async function findUserBySession(db: Client, token: string, now: Date): Promise<SessionUser | null> {
+  // Disabled accounts are returned so callers can explain *why* access was
+  // denied; `requireUser` is responsible for rejecting them.
   const result = await db.execute({
-    sql: `SELECT u.id, u.email, u.role, u.llm_key_encrypted
+    sql: `SELECT u.id, u.email, u.role, u.llm_key_encrypted, u.disabled
           FROM sessions s
           JOIN users u ON u.id = s.user_id
-          WHERE s.token = ? AND s.expires_at > ? AND u.disabled = 0`,
+          WHERE s.token = ? AND s.expires_at > ?`,
     args: [token, now.toISOString()]
   });
   const row = result.rows[0];
@@ -101,7 +104,8 @@ export async function findUserBySession(db: Client, token: string, now: Date): P
     id: Number(row['id']),
     email: String(row['email']),
     role: row['role'] === 'admin' ? 'admin' : 'user',
-    hasPersonalKey: row['llm_key_encrypted'] != null
+    hasPersonalKey: row['llm_key_encrypted'] != null,
+    disabled: Number(row['disabled']) === 1
   };
 }
 
@@ -137,7 +141,10 @@ export async function listUsers(db: Client): Promise<AdminUserRow[]> {
 
 export async function setUserDisabled(db: Client, userId: number, disabled: boolean): Promise<void> {
   await db.execute({ sql: 'UPDATE users SET disabled = ? WHERE id = ?', args: [disabled ? 1 : 0, userId] });
-  if (disabled) {
+  // Sessions are kept while disabled so requests can report the real reason
+  // (an "account disabled" screen instead of a silent sign-out). On re-enable
+  // they are purged, so access always requires a fresh login.
+  if (!disabled) {
     await revokeAllSessionsForUser(db, userId);
   }
 }

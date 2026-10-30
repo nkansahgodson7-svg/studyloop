@@ -59,7 +59,7 @@ describe('admin data layer', () => {
   });
 });
 
-describe('disableUser purges sessions', () => {
+describe('disableUser invalidates sessions', () => {
   let db: Client;
 
   beforeAll(async () => {
@@ -71,27 +71,29 @@ describe('disableUser purges sessions', () => {
     await db.close();
   });
 
-  it('revokes every session when a user is disabled and restores none when re-enabled', async () => {
+  it('rejects disabled sessions, then purges them when re-enabled', async () => {
     const user = await createUser(db, {
       email: 'victim@test.local',
       passwordHash: await hashPassword(PASSWORD),
       role: 'user'
     });
+    const token = await createSession(db, user.id);
     await createSession(db, user.id);
-    await createSession(db, user.id);
-    const sessionsBefore = await db.execute({ sql: 'SELECT COUNT(*) n FROM sessions WHERE user_id = ?', args: [user.id] });
-    expect(Number(sessionsBefore.rows[0]!.n)).toBe(2);
 
     await adminSetDisabledRow(db, user.id, true);
-    const after = await db.execute({ sql: 'SELECT COUNT(*) n FROM sessions WHERE user_id = ?', args: [user.id] });
-    expect(Number(after.rows[0]!.n)).toBe(0);
-
     const row = await db.execute({ sql: 'SELECT disabled FROM users WHERE id = ?', args: [user.id] });
     expect(Number(row.rows[0]!.disabled)).toBe(1);
+    expect((await findUserBySession(db, token, new Date()))?.disabled).toBe(true);
+    await expect(
+      requireUser(db, await reqWithCookie('http://x/api', token))
+    ).rejects.toMatchObject({ status: 403, code: 'account_disabled' });
 
     await adminSetDisabledRow(db, user.id, false);
     const restored = await db.execute({ sql: 'SELECT disabled FROM users WHERE id = ?', args: [user.id] });
     expect(Number(restored.rows[0]!.disabled)).toBe(0);
+    const sessionsAfter = await db.execute({ sql: 'SELECT COUNT(*) n FROM sessions WHERE user_id = ?', args: [user.id] });
+    expect(Number(sessionsAfter.rows[0]!.n)).toBe(0);
+    expect(await findUserBySession(db, token, new Date())).toBeNull();
   });
 
   async function adminSetDisabledRow(dbc: Client, id: number, disabled: boolean): Promise<void> {
@@ -233,13 +235,16 @@ describe('admin disable enable APIs', () => {
     await db.close();
   });
 
-  it('disable through API purges sessions: revoked token no longer resolves', async () => {
+  it('disable through API invalidates the session with an account_disabled 403', async () => {
     const res = await adminSetDisabled(db, await adminRequest(`http://x/api/admin/users/${userId}`, 'PATCH', {
       disabled: true
     }, adminToken), String(userId));
     expect(res.status).toBe(200);
 
-    expect(await findUserBySession(db, userSession, new Date())).toBeNull();
+    expect((await findUserBySession(db, userSession, new Date()))?.disabled).toBe(true);
+    await expect(
+      requireUser(db, await reqWithCookie('http://x/api', userSession))
+    ).rejects.toMatchObject({ status: 403, code: 'account_disabled' });
   });
 
   it('disabled target cannot log in even with the right password', async () => {

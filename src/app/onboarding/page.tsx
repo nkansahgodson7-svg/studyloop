@@ -6,6 +6,7 @@ import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icons";
 import { meCache } from "@/lib/client/cache";
+import { authRedirectFor } from "@/lib/client/api";
 
 const GROQ_CONSOLE_URL = "https://console.groq.com/keys";
 const MIN_KEY_LENGTH = 20;
@@ -79,7 +80,8 @@ export default function OnboardingPage() {
       .catch((cause) => {
         if (!active) return;
         setChecked(true);
-        if ((cause as { status?: number }).status === 401) router.replace("/login");
+        const redirect = authRedirectFor(cause);
+        if (redirect) router.replace(redirect);
       });
     return () => {
       active = false;

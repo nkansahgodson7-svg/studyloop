@@ -2,11 +2,11 @@
 
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { Ring } from "@/components/ui/Ring";
 import { Icon, clamp, plural } from "@/components/ui/icons";
-import { getJson, type CardRow, type Notebook, type SourceRow } from "@/lib/client/api";
+import { authRedirectFor, getJson, type CardRow, type Notebook, type SourceRow } from "@/lib/client/api";
 import type { UserSummary } from "@/lib/client/summary";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 
@@ -69,6 +69,7 @@ function SessionFallback() {
 }
 
 function ReviewSession() {
+  const router = useRouter();
   const search = useSearchParams();
   const notebookParam = search.get("notebook");
   const practice = search.get("practice") === "1" || notebookParam === "all";
@@ -134,13 +135,18 @@ function ReviewSession() {
         reviewed: 0,
         grades: { again: 0, hard: 0, good: 0, easy: 0 }
       });
-      } catch {
+      } catch (error) {
+        const redirect = authRedirectFor(error);
+        if (redirect) {
+          router.replace(redirect);
+          return;
+        }
         setSession(null);
       } finally {
         setLoading(false);
       }
     })();
-  }, [notebookParam, practice]);
+  }, [notebookParam, practice, router]);
 
   function grade(next: GradeKey) {
     const prev = sessionRef.current;
