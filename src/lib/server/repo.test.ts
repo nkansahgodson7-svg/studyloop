@@ -63,16 +63,19 @@ describe('users + sessions data layer', () => {
     expect(await findUserBySession(db, token, later)).toBeNull();
   });
 
-  it('disabled user is invisible to sessions; revocation purges tokens', async () => {
+  it('keeps disabled sessions for identification and purges them on re-enable', async () => {
     const owner = await seedUser(db, 'disable.user@test.local');
     const token = await createSession(db, owner.id);
 
     await setUserDisabled(db, owner.id, true);
-    expect(await findUserBySession(db, token, new Date())).toBeNull();
+    const disabled = await findUserBySession(db, token, new Date());
+    expect(disabled?.id).toBe(owner.id);
+    expect(disabled?.disabled).toBe(true);
     expect(await findEnabledUserByEmail(db, 'disable.user@test.local')).toBeNull();
 
     await setUserDisabled(db, owner.id, false);
     expect(await findEnabledUserByEmail(db, 'disable.user@test.local')).not.toBeNull();
+    expect(await findUserBySession(db, token, new Date())).toBeNull();
 
     await revokeAllSessionsForUser(db, owner.id);
     expect(await findUserBySession(db, token, new Date())).toBeNull();

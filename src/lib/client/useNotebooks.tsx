@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
-import { getJson } from "./api";
+import { authRedirectFor, getJson } from "./api";
 import { notebookViewsCache } from "./cache";
 
 export function useNotebookList() {
@@ -23,8 +23,9 @@ export function useNotebookList() {
     if (!notebookViewsCache.isFresh()) {
       void notebookViewsCache.load().catch((error) => {
         if (!active) return;
-        if ((error as { status?: number }).status === 401) {
-          router.replace("/login");
+        const redirect = authRedirectFor(error);
+        if (redirect) {
+          router.replace(redirect);
           return;
         }
         if (notebookViewsCache.get() === null) {

@@ -12,6 +12,7 @@ import ChatPanel from "@/components/notebook/ChatPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
+import { authRedirectFor } from "@/lib/client/api";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 
 type Tab = "overview" | "chat" | "cards";
@@ -258,8 +259,9 @@ export default function NotebookScreen() {
         setStatus("ready");
       } catch (error) {
         const code = (error as { status?: number }).status;
-        if (code === 401) {
-          router.replace("/login");
+        const redirect = authRedirectFor(error);
+        if (redirect) {
+          router.replace(redirect);
           return;
         }
         if (_silent) return;

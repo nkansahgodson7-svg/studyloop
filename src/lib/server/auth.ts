@@ -18,10 +18,12 @@ export const SESSION_COOKIE = 'sl_session';
 
 export class HttpError extends Error {
   readonly status: number;
+  readonly code?: string;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -43,6 +45,9 @@ export async function requireUser(db: Client, req: Request): Promise<SessionUser
   if (!token || !user) {
     throw new HttpError(401, 'authentication required');
   }
+  if (user.disabled) {
+    throw new HttpError(403, 'account disabled', 'account_disabled');
+  }
   return user;
 }
 
@@ -56,7 +61,10 @@ export async function requireAdmin(db: Client, req: Request): Promise<SessionUse
 
 export function errorResponse(error: unknown): NextResponse {
   if (error instanceof HttpError) {
-    return NextResponse.json({ error: error.message }, { status: error.status });
+    return NextResponse.json(
+      { error: error.message, ...(error.code ? { code: error.code } : {}) },
+      { status: error.status }
+    );
   }
   throw error;
 }

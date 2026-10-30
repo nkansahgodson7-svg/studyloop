@@ -56,6 +56,16 @@ describe('auth guards', () => {
     ).rejects.toMatchObject({ status: 401 });
   });
 
+  it('requireUser throws a coded 403 for a disabled account', async () => {
+    const user = await seedUser(db, 'guard.disabled@test.local', 'user');
+    const token = await createSession(db, user.id);
+    await db.execute({ sql: 'UPDATE users SET disabled = 1 WHERE id = ?', args: [user.id] });
+
+    await expect(
+      requireUser(db, await requestWithCookie('http://x/api', token))
+    ).rejects.toMatchObject({ status: 403, code: 'account_disabled', message: 'account disabled' });
+  });
+
   it('requireAdmin accepts an admin session with 200 and rejects a plain user with 403', async () => {
     const admin = await seedUser(db, 'guard.admin@test.local', 'admin');
     const plain = await seedUser(db, 'guard.plain@test.local', 'user');

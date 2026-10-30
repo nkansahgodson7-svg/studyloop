@@ -9,6 +9,7 @@ import { useSheet } from "@/components/ui/Sheet";
 import { SheetFrame } from "@/components/ui/Sheet";
 import { Icon, initialsOf } from "@/components/ui/icons";
 import { clearSessionCaches, meCache, summaryCache, notebookViewsCache } from "@/lib/client/cache";
+import { authRedirectFor } from "@/lib/client/api";
 import { DEMO_EMAIL } from "@/lib/client/demo";
 
 export default function SettingsPage() {
@@ -32,8 +33,13 @@ export default function SettingsPage() {
 
     void Promise.all([meCache.load(), summaryCache.load()]).catch((error) => {
       if (!active) return;
-      if ((error as { status?: number }).status === 401) {
-        setUnauthorized(true);
+      const redirect = authRedirectFor(error);
+      if (redirect) {
+        if (redirect === "/account-disabled") {
+          router.replace(redirect);
+        } else {
+          setUnauthorized(true);
+        }
         return;
       }
       toast("Could not load your account");
@@ -44,7 +50,7 @@ export default function SettingsPage() {
       unsubscribeMe();
       unsubscribeSummary();
     };
-  }, [toast]);
+  }, [router, toast]);
 
   async function reloadMe() {
     try {

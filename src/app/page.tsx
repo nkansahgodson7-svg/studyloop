@@ -10,6 +10,7 @@ import { GreetingSkeleton, HeroSkeleton, RowSkeletonList } from "@/components/ui
 import { useToast } from "@/components/ui/Toast";
 import { useNotebookList } from "@/lib/client/useNotebooks";
 import { meCache, summaryCache } from "@/lib/client/cache";
+import { authRedirectFor } from "@/lib/client/api";
 
 function nameFromEmail(email: string): string {
   const prefix = email.split("@")[0] || "learner";
@@ -42,8 +43,9 @@ export default function HomePage() {
 
     void Promise.all([meCache.load(), summaryCache.load()]).catch((error) => {
       if (!active) return;
-      if ((error as { status?: number }).status === 401) {
-        router.replace("/login");
+      const redirect = authRedirectFor(error);
+      if (redirect) {
+        router.replace(redirect);
         return;
       }
       toast("Could not load your data");
