@@ -24,6 +24,7 @@ const EXIT_DURATION: Record<NavDirection, number> = { push: 340, pop: 300, fade:
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const isAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
   const firstCommit = useRef(true);
   const prevPath = useRef<string | null>(null);
   const viewRef = useRef<HTMLDivElement | null>(null);
@@ -73,7 +74,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <NavDirectionContext.Provider value={direction}>
       <SheetProvider>
         <ToastProvider>
-          <div className="shell">
+          <div className={`shell ${isAdmin ? "shell--admin" : ""}`}>
             <main className="view">
               <div ref={viewRef}>{children}</div>
               {exit !== null ? (

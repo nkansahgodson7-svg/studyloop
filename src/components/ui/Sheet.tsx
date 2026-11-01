@@ -30,6 +30,10 @@ export function SheetProvider({ children }: { children: ReactNode }) {
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const open = useCallback((next: ReactNode) => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
     if (isOpen) {
       setNode(next);
       return;

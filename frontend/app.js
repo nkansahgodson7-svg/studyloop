@@ -27,6 +27,10 @@
     addBusy: false,
     addError: null,
     sheetNotebook: null,
+    adminQuery: "",
+    adminRole: "all",
+    adminStatus: "all",
+    adminUser: null,
   };
 
   const app = (SL.app = {});
@@ -46,6 +50,7 @@
           parsed.settings = parsed.settings || { personalKey: false };
           parsed.streak = parsed.streak || 0;
           parsed.reviewedToday = parsed.reviewedToday || 0;
+          parsed.admin = parsed.admin && Array.isArray(parsed.admin.users) ? parsed.admin : SL.adminSeed();
           return parsed;
         }
       }
@@ -76,6 +81,7 @@
         chats: state.chats || {},
         generated: state.generated || {},
         settings: state.settings || { personalKey: false },
+        admin: state.admin || SL.adminSeed(),
       };
       save();
       render({ instant: false });
@@ -94,6 +100,15 @@
 
   function notebookById(id) {
     return state.notebooks.find((notebook) => notebook.id === Number(id)) || null;
+  }
+
+  function adminState() {
+    if (!state.admin || !Array.isArray(state.admin.users)) state.admin = SL.adminSeed();
+    return state.admin;
+  }
+
+  function adminUserById(id) {
+    return adminState().users.find((user) => user.id === Number(id)) || null;
   }
 
   const sourcesOf = (id) => state.sources[id] || [];
@@ -196,6 +211,7 @@
     }
     if (parts[0] === "review") return { name: "review", depth: 1, routeKey: "review" };
     if (parts[0] === "library") return { name: "library", depth: 1, routeKey: "library" };
+    if (parts[0] === "admin") return { name: "admin", depth: 1, routeKey: "admin" };
     if (parts[0] === "settings") return { name: "settings", depth: 1, routeKey: "settings" };
     return { name: "home", depth: 1, routeKey: "home" };
   }
@@ -333,6 +349,7 @@
     if (route.name === "session") return SL.ui.session(route.sessionKey);
     if (route.name === "review") return SL.ui.review();
     if (route.name === "library") return SL.ui.library();
+    if (route.name === "admin") return SL.ui.admin();
     if (route.name === "settings") return SL.ui.settings();
     return SL.ui.home();
   }
@@ -340,6 +357,7 @@
   function updateChrome(route) {
     const showTabs = ["home", "review", "library", "settings"].includes(route.name);
     tabbar.classList.toggle("is-visible", showTabs);
+    document.body.classList.toggle("is-admin", route.name === "admin");
     for (const button of tabbar.children) {
       button.classList.toggle("is-active", button.dataset.nav === `#/${route.name}`);
     }
@@ -351,6 +369,7 @@
       settings: "Settings",
       notebook: "Notebook",
       session: "Review session",
+      admin: "Admin",
     };
     document.title = `${titles[route.name] || "StudyLoop"} — StudyLoop`;
   }
@@ -360,6 +379,109 @@
       requestAnimationFrame(scrollChat);
     }
     if (route.name === "session") setupSwipe();
+    if (route.name === "admin") setupAdmin();
+  }
+
+  function adminFilterRows() {
+    const search = document.getElementById("adminSearch");
+    const role = document.getElementById("adminRole");
+    const status = document.getElementById("adminStatus");
+    if (!search || !role || !status) return;
+    ui.adminQuery = search.value;
+    ui.adminRole = role.value;
+    ui.adminStatus = status.value;
+    const query = search.value.trim().toLowerCase();
+    const rows = Array.from(view.querySelectorAll("[data-user-row]"));
+    let shown = 0;
+    for (const row of rows) {
+      const matchesQuery =
+        !query ||
+        row.dataset.name.includes(query) ||
+        row.dataset.email.includes(query) ||
+        row.dataset.courses.includes(query);
+      const matchesRole = role.value === "all" || row.dataset.role === role.value;
+      let matchesStatus = status.value === "all";
+      if (status.value === "active") matchesStatus = row.dataset.status === "active" && row.dataset.risk !== "1";
+      if (status.value === "risk") matchesStatus = row.dataset.risk === "1";
+      if (status.value === "disabled") matchesStatus = row.dataset.status === "disabled";
+      const visible = matchesQuery && matchesRole && matchesStatus;
+      row.hidden = !visible;
+      if (visible) shown += 1;
+    }
+    const count = document.getElementById("adminCount");
+    if (count) count.textContent = `${shown} of ${rows.length} users`;
+    const empty = document.getElementById("adminNoResults");
+    if (empty) empty.hidden = shown !== 0;
+    if (ui.adminUser) {
+      const selectedRow = rows.find((row) => Number(row.dataset.id) === Number(ui.adminUser));
+      if (selectedRow && selectedRow.hidden) closeAdminUser();
+    }
+  }
+
+  function setupAdmin() {
+    const search = document.getElementById("adminSearch");
+    const role = document.getElementById("adminRole");
+    const status = document.getElementById("adminStatus");
+    if (!search || !role || !status) return;
+    search.addEventListener("input", adminFilterRows);
+    role.addEventListener("change", adminFilterRows);
+    status.addEventListener("change", adminFilterRows);
+    adminFilterRows();
+    for (const row of view.querySelectorAll("[data-user-row]")) {
+      row.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        openAdminUser(Number(row.dataset.id));
+      });
+    }
+    if (ui.adminUser) {
+      const active = view.querySelector(`[data-user-row][data-id="${ui.adminUser}"]`);
+      if (active) active.classList.add("is-selected");
+    }
+  }
+
+  function openAdminUser(id) {
+    const user = adminUserById(id);
+    const root = view.querySelector(".admin");
+    const panel = document.getElementById("adminDetail");
+    if (!user || !root || !panel) return;
+    ui.adminUser = user.id;
+    for (const row of view.querySelectorAll("[data-user-row]")) {
+      row.classList.toggle("is-selected", Number(row.dataset.id) === user.id);
+    }
+    panel.innerHTML = SL.ui.adminDetail(user.id);
+    panel.setAttribute("aria-hidden", "false");
+    root.classList.add("has-detail");
+  }
+
+  function closeAdminUser() {
+    ui.adminUser = null;
+    const root = view.querySelector(".admin");
+    const panel = document.getElementById("adminDetail");
+    if (root) root.classList.remove("has-detail");
+    if (panel) {
+      panel.setAttribute("aria-hidden", "true");
+      panel.innerHTML = "";
+    }
+    for (const row of view.querySelectorAll("[data-user-row].is-selected")) {
+      row.classList.remove("is-selected");
+    }
+  }
+
+  function adminScrollTo(id) {
+    const scroller = view.querySelector(".admin__scroll");
+    const target = document.getElementById(id);
+    if (!scroller || !target) return;
+    const top = target.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop - 12;
+    scroller.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  }
+
+  function applyAdminFilter(filter) {
+    const status = document.getElementById("adminStatus");
+    if (!status) return;
+    status.value = filter;
+    adminFilterRows();
+    adminScrollTo("adminUsers");
   }
 
   function setupSwipe() {
@@ -1095,6 +1217,75 @@
         refresh();
         toast("Personal key removed");
         break;
+      case "admin-user":
+        openAdminUser(Number(element.dataset.id));
+        break;
+      case "admin-close-user":
+        closeAdminUser();
+        break;
+      case "admin-scroll": {
+        for (const item of view.querySelectorAll('.admin__nav-item[data-action="admin-scroll"]')) {
+          item.classList.toggle("is-active", item === element);
+        }
+        adminScrollTo(element.dataset.target);
+        break;
+      }
+      case "admin-filter":
+        applyAdminFilter(element.dataset.filter);
+        break;
+      case "admin-reset-password": {
+        const user = adminUserById(element.dataset.id);
+        if (!user) break;
+        openConfirm({
+          title: "Reset password",
+          sub: user.email,
+          body: `Send ${user.name} a password reset link? In this prototype no email is sent.`,
+          label: "Send reset link",
+          danger: false,
+          onConfirm: () => toast(`Reset link sent to ${user.email}`),
+        });
+        break;
+      }
+      case "admin-toggle-status": {
+        const user = adminUserById(element.dataset.id);
+        if (!user) break;
+        const disabling = user.status !== "disabled";
+        openConfirm({
+          title: disabling ? "Disable account" : "Enable account",
+          sub: user.email,
+          body: disabling
+            ? `${user.name} will be signed out and blocked from signing in until re-enabled.`
+            : `${user.name} will be able to sign in again immediately.`,
+          label: disabling ? "Disable account" : "Enable account",
+          danger: disabling,
+          onConfirm: () => {
+            user.status = disabling ? "disabled" : "active";
+            if (!disabling) user.lastActive = new Date().toISOString();
+            save();
+            refresh();
+            toast(disabling ? "Account disabled" : "Account enabled");
+          },
+        });
+        break;
+      }
+      case "admin-delete-user": {
+        const user = adminUserById(element.dataset.id);
+        if (!user) break;
+        openConfirm({
+          title: "Delete user",
+          sub: user.email,
+          body: `This permanently removes ${user.name}, their notebooks, and review history. This cannot be undone.`,
+          label: "Delete user",
+          onConfirm: () => {
+            state.admin.users = state.admin.users.filter((item) => item.id !== user.id);
+            ui.adminUser = null;
+            save();
+            refresh();
+            toast("User deleted");
+          },
+        });
+        break;
+      }
       case "reset-demo": {
         openConfirm({
           title: "Reset demo data",
@@ -1208,6 +1399,9 @@
     generatingId,
     sheetState,
     ensureSession,
+    adminState,
+    adminUserById,
+    adminUiState: ui,
     grade: gradeCard,
   });
 
