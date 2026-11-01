@@ -19,7 +19,6 @@ import {
 } from './repo';
 
 export const SESSION_COOKIE = 'sl_session';
-export const FORCE_CHANGE_COOKIE = 'sl_force_change';
 
 export class HttpError extends Error {
   readonly status: number;
@@ -44,6 +43,19 @@ export function readSessionToken(req: Request): string | null {
   return null;
 }
 
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+  '/api/auth/me',
+  '/api/auth/change-password'
+]);
+
+function requestPathname(req: Request): string {
+  try {
+    return new URL(req.url).pathname;
+  } catch {
+    return '';
+  }
+}
+
 export async function requireUser(db: Client, req: Request): Promise<SessionUser> {
   const token = readSessionToken(req);
   const user = token ? await findUserBySession(db, token, new Date()) : null;
@@ -52,6 +64,12 @@ export async function requireUser(db: Client, req: Request): Promise<SessionUser
   }
   if (user.disabled) {
     throw new HttpError(403, 'account disabled', 'account_disabled');
+  }
+  if (
+    user.mustChangePassword &&
+    !PASSWORD_CHANGE_ALLOWED_PATHS.has(requestPathname(req))
+  ) {
+    throw new HttpError(403, 'password change required', 'password_change_required');
   }
   return user;
 }
@@ -113,12 +131,6 @@ async function issueSession(db: Client, user: UserRow, status = 200): Promise<Ne
     { status }
   );
   res.cookies.set({ ...cookieBase, value: token, maxAge: SESSION_MAX_AGE });
-  res.cookies.set({
-    ...cookieBase,
-    name: FORCE_CHANGE_COOKIE,
-    value: user.mustChangePassword ? '1' : '',
-    maxAge: user.mustChangePassword ? SESSION_MAX_AGE : 0
-  });
   return res;
 }
 
@@ -272,9 +284,7 @@ export async function changePassword(db: Client, req: Request): Promise<NextResp
     await revokeOtherSessionsForUser(db, user.id, token);
   }
 
-  const res = NextResponse.json({ ok: true, role: user.role });
-  res.cookies.set({ ...cookieBase, name: FORCE_CHANGE_COOKIE, value: '', maxAge: 0 });
-  return res;
+  return NextResponse.json({ ok: true, role: user.role });
 }
 
 export async function logout(db: Client, req: Request): Promise<NextResponse> {
@@ -284,7 +294,6 @@ export async function logout(db: Client, req: Request): Promise<NextResponse> {
   }
   const res = NextResponse.json({ ok: true });
   res.cookies.set({ ...cookieBase, value: '', maxAge: 0 });
-  res.cookies.set({ ...cookieBase, name: FORCE_CHANGE_COOKIE, value: '', maxAge: 0 });
   return res;
 }
 

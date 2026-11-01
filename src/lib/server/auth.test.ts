@@ -75,6 +75,25 @@ describe('auth guards', () => {
     ).rejects.toMatchObject({ status: 403, code: 'account_disabled', message: 'account disabled' });
   });
 
+  it('blocks app APIs for a session pending a password change', async () => {
+    const user = await seedUser(db, 'guard.mustchange@test.local', 'user');
+    const token = await createSession(db, user.id);
+    await updateUserPassword(db, user.id, await hashPassword(PASSWORD), {
+      mustChangePassword: true,
+      passwordExpiresAt: new Date(Date.now() + 60_000).toISOString()
+    });
+
+    await expect(
+      requireUser(db, await requestWithCookie('http://x/api/notebooks', token))
+    ).rejects.toMatchObject({ status: 403, code: 'password_change_required' });
+
+    const allowed = await requireUser(
+      db,
+      await requestWithCookie('http://x/api/auth/change-password', token)
+    );
+    expect(allowed.mustChangePassword).toBe(true);
+  });
+
   it('requireAdmin accepts an admin session with 200 and rejects a plain user with 403', async () => {
     const admin = await seedUser(db, 'guard.admin@test.local', 'admin');
     const plain = await seedUser(db, 'guard.plain@test.local', 'user');
@@ -237,7 +256,6 @@ describe('change password route', () => {
     const res = await changePassword(db, changeRequest(token, 'temp-password', 'new-password'));
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ ok: true, role: 'user' });
-    expect(res.cookies.get('sl_force_change')?.maxAge).toBe(0);
 
     const session = await findUserBySession(db, token, new Date());
     expect(session?.mustChangePassword).toBe(false);

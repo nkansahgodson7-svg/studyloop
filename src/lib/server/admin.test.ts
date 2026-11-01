@@ -443,7 +443,6 @@ describe('admin reset password', () => {
     }));
     expect(loginRes.status).toBe(200);
     expect(await loginRes.json()).toMatchObject({ mustChangePassword: true });
-    expect(loginRes.cookies.get('sl_force_change')?.value).toBe('1');
   });
 
   it('rejects non-admins, unknown users, and resetting your own account', async () => {
