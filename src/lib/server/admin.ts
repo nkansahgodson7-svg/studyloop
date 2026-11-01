@@ -1,11 +1,20 @@
+import { randomBytes } from 'node:crypto';
 import type { Client } from '@libsql/client';
 import { type } from 'arktype';
 import { NextResponse } from 'next/server';
 import { hashPassword } from './crypto';
-import { createUser, isUniqueViolation, listUsers, setUserDisabled } from './repo';
+import {
+  countAdmins,
+  createUser,
+  deleteUser,
+  isUniqueViolation,
+  listUsers,
+  revokeAllSessionsForUser,
+  setUserDisabled,
+  updateUserPassword
+} from './repo';
 import { errorResponse, requireAdmin } from './auth';
-
-const MIN_PASSWORD_LENGTH = 12;
+import { MIN_PASSWORD_LENGTH } from '../password';
 
 const NewUserBody = type({
   email: 'string.email',
@@ -102,13 +111,109 @@ export async function adminSetDisabled(db: Client, req: Request, idRaw: string):
   return NextResponse.json({ ok: true, disabled: body.disabled, id });
 }
 
+function parseUserId(idRaw: string): number | null {
+  const id = Number(idRaw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+async function findTargetUser(
+  db: Client,
+  id: number
+): Promise<{ id: number; email: string; role: 'admin' | 'user' } | null> {
+  const result = await db.execute({
+    sql: 'SELECT id, email, role FROM users WHERE id = ?',
+    args: [id]
+  });
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    id: Number(row['id']),
+    email: String(row['email']),
+    role: row['role'] === 'admin' ? 'admin' : 'user'
+  };
+}
+
+const TEMP_PASSWORD_TTL_MS = 24 * 3600 * 1000;
+
+/** 19 characters, URL-safe, and well above the shared password minimum. */
+export function temporaryPassword(): string {
+  return `sl-${randomBytes(12).toString('base64url')}`;
+}
+
+export async function adminResetPassword(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  let admin: Awaited<ReturnType<typeof requireAdmin>>;
+  try {
+    admin = await requireAdmin(db, req);
+  } catch (error) {
+    return errorResponse(error);
+  }
+
+  const id = parseUserId(idRaw);
+  if (id === null) {
+    return NextResponse.json({ error: 'unknown user' }, { status: 404 });
+  }
+  if (id === admin.id) {
+    return NextResponse.json(
+      { error: 'use the change password page to update your own password' },
+      { status: 400 }
+    );
+  }
+  const target = await findTargetUser(db, id);
+  if (!target) {
+    return NextResponse.json({ error: 'unknown user' }, { status: 404 });
+  }
+
+  const password = temporaryPassword();
+  const expiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
+  await updateUserPassword(db, id, await hashPassword(password), {
+    mustChangePassword: true,
+    passwordExpiresAt: expiresAt
+  });
+  await revokeAllSessionsForUser(db, id);
+  return NextResponse.json({
+    ok: true,
+    id,
+    email: target.email,
+    temporaryPassword: password,
+    expiresAt
+  });
+}
+
+export async function adminDeleteUser(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  let admin: Awaited<ReturnType<typeof requireAdmin>>;
+  try {
+    admin = await requireAdmin(db, req);
+  } catch (error) {
+    return errorResponse(error);
+  }
+
+  const id = parseUserId(idRaw);
+  if (id === null) {
+    return NextResponse.json({ error: 'unknown user' }, { status: 404 });
+  }
+  if (id === admin.id) {
+    return NextResponse.json({ error: 'you cannot delete your own account' }, { status: 400 });
+  }
+
+  const target = await findTargetUser(db, id);
+  if (!target) {
+    return NextResponse.json({ error: 'unknown user' }, { status: 404 });
+  }
+  if (target.role === 'admin' && (await countAdmins(db)) <= 1) {
+    return NextResponse.json({ error: 'cannot delete the last admin' }, { status: 400 });
+  }
+
+  await deleteUser(db, id);
+  return NextResponse.json({ ok: true, id });
+}
+
 export interface DayCount {
   date: string;
   count: number;
 }
 
 export interface AdminStats {
-  users: { total: number; admins: number; disabled: number; newLast7d: number };
+  users: { total: number; admins: number; disabled: number; newLast7d: number; atRisk: number };
   content: { notebooks: number; sources: number; cards: number };
   activity: { reviews: number; dueNow: number; chatPrompts: number; activeUsers7d: number };
   series: { signups: DayCount[]; reviews: DayCount[] };
@@ -169,18 +274,41 @@ export async function computeAdminStats(db: Client): Promise<AdminStats> {
       args: [now]
     }),
     db.execute({
-      sql: `SELECT COUNT(*) AS total FROM (
-              SELECT nb.user_id AS uid
-                FROM review_log rl
-                JOIN cards c ON c.id = rl.card_id
-                JOIN notebooks nb ON nb.id = c.notebook_id
-               WHERE rl.graded_at >= ?
-              UNION
-              SELECT nb.user_id AS uid
-                FROM chat_messages m
-                JOIN notebooks nb ON nb.id = m.notebook_id
-               WHERE m.role = 'user' AND m.created_at >= ?
-            )`,
+      sql: `WITH activity AS (
+              SELECT events.uid AS uid, MAX(events.ts) AS last_active
+                FROM (
+                  SELECT nb.user_id AS uid, nb.created_at AS ts FROM notebooks nb
+                  UNION ALL
+                  SELECT nb.user_id AS uid, s.created_at AS ts
+                    FROM sources s JOIN notebooks nb ON nb.id = s.notebook_id
+                  UNION ALL
+                  SELECT nb.user_id AS uid, c.created_at AS ts
+                    FROM cards c JOIN notebooks nb ON nb.id = c.notebook_id
+                  UNION ALL
+                  SELECT nb.user_id AS uid, rl.graded_at AS ts
+                    FROM review_log rl
+                    JOIN cards c ON c.id = rl.card_id
+                    JOIN notebooks nb ON nb.id = c.notebook_id
+                  UNION ALL
+                  SELECT nb.user_id AS uid, m.created_at AS ts
+                    FROM chat_messages m JOIN notebooks nb ON nb.id = m.notebook_id
+                   WHERE m.role = 'user'
+                  UNION ALL
+                  SELECT se.user_id AS uid, se.created_at AS ts
+                    FROM sessions se WHERE se.created_at IS NOT NULL
+                  UNION ALL
+                  SELECT qa.user_id AS uid, qa.created_at AS ts FROM quiz_attempts qa
+                ) events
+              GROUP BY events.uid
+            ),
+            counted AS (
+              SELECT u.id, u.disabled, a.last_active
+                FROM users u LEFT JOIN activity a ON a.uid = u.id
+            )
+            SELECT
+              SUM(CASE WHEN disabled = 0 AND last_active >= ? THEN 1 ELSE 0 END) AS active7d,
+              SUM(CASE WHEN disabled = 0 AND (last_active IS NULL OR last_active < ?) THEN 1 ELSE 0 END) AS at_risk
+              FROM counted`,
       args: [since7, since7]
     }),
     db.execute({
@@ -205,7 +333,8 @@ export async function computeAdminStats(db: Client): Promise<AdminStats> {
       total: num(users?.['total']),
       admins: num(users?.['admins']),
       disabled: num(users?.['disabled']),
-      newLast7d: num(users?.['newLast7d'])
+      newLast7d: num(users?.['newLast7d']),
+      atRisk: num(active?.['at_risk'])
     },
     content: {
       notebooks: num(content?.['notebooks']),
@@ -216,7 +345,7 @@ export async function computeAdminStats(db: Client): Promise<AdminStats> {
       reviews: num(activity?.['reviews']),
       dueNow: num(activity?.['due_now']),
       chatPrompts: num(activity?.['chat_prompts']),
-      activeUsers7d: num(active?.['total'])
+      activeUsers7d: num(active?.['active7d'])
     },
     series: {
       signups: zeroFill(signupRows.rows as Array<Record<string, unknown>>, SERIES_DAYS),

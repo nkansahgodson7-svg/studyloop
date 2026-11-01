@@ -6,8 +6,7 @@ import { useRouter } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useToast } from "@/components/ui/Toast";
 import { clearSessionCaches } from "@/lib/client/cache";
-
-const MIN_PASSWORD_LENGTH = 8;
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 export default function SignupPage() {
   const router = useRouter();

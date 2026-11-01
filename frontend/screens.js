@@ -62,6 +62,339 @@ SL.ui = SL.ui || {};
     </section>`;
   };
 
+  function adminAgo(iso) {
+    if (!iso) return "Never";
+    const diff = Math.max(0, Date.now() - new Date(iso).getTime());
+    const mins = Math.round(diff / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.round(hours / 24);
+    if (days < 30) return `${days}d ago`;
+    return `${Math.round(days / 30)}mo ago`;
+  }
+
+  function adminDaysSince(iso) {
+    return iso ? (Date.now() - new Date(iso).getTime()) / 86400000 : Infinity;
+  }
+
+  function adminDate(iso) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  }
+
+  function adminStatusOf(user) {
+    if (user.status === "disabled") return "disabled";
+    return adminDaysSince(user.lastActive) > 7 ? "risk" : "active";
+  }
+
+  function adminStatusChip(user) {
+    const status = adminStatusOf(user);
+    if (status === "disabled") return `<span class="chip chip--plain">Disabled</span>`;
+    if (status === "risk") return `<span class="chip chip--accent">At risk</span>`;
+    return `<span class="chip chip--brand">Active</span>`;
+  }
+
+  function adminBars(series, options) {
+    const opts = options || {};
+    const max = Math.max(1, ...series);
+    const width = 560;
+    const height = opts.height || 132;
+    const gap = 6;
+    const barWidth = (width - gap * (series.length - 1)) / series.length;
+    const bars = series.map((value, index) => {
+      const barHeight = Math.max(2, (value / max) * (height - 8));
+      const x = index * (barWidth + gap);
+      const y = height - barHeight;
+      const recent = index >= series.length - 7;
+      return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${barHeight.toFixed(1)}" rx="2.5" fill="${recent ? "var(--brand)" : "var(--line-strong)"}"></rect>`;
+    }).join("");
+    return `<svg class="admin-chart" viewBox="0 0 ${width} ${height}" role="img" aria-label="${esc(opts.label || "Trend")}">${bars}</svg>`;
+  }
+
+  function adminMetric(label, value, note, variant) {
+    return `<article class="admin-kpi ${variant || ""}">
+      <p class="eyebrow">${label}</p>
+      <p class="admin-kpi__value">${value}</p>
+      <p class="admin-kpi__note">${note}</p>
+    </article>`;
+  }
+
+  function adminInsight(tone, glyph, title, detail, action) {
+    return `<div class="admin-insight">
+      <span class="admin-insight__icon ${tone}" aria-hidden="true">${icon(glyph, 16)}</span>
+      <div class="grow">
+        <strong>${title}</strong>
+        <span>${detail}</span>
+      </div>
+      ${action || ""}
+    </div>`;
+  }
+
+  ui.admin = function adminScreen() {
+    const app = SL.app;
+    const admin = app.adminState();
+    const users = admin.users;
+    const series = admin.series;
+    const active = users.filter((user) => adminStatusOf(user) === "active").length;
+    const atRisk = users.filter((user) => adminStatusOf(user) === "risk").length;
+    const disabled = users.filter((user) => user.status === "disabled").length;
+    const newThisMonth = users.filter((user) => adminDaysSince(user.joined) <= 30).length;
+    const reviews7 = series.reviews.slice(-7).reduce((sum, n) => sum + n, 0);
+    const prior7 = series.reviews.slice(-14, -7).reduce((sum, n) => sum + n, 0);
+    const reviewDelta = prior7 ? Math.round(((reviews7 - prior7) / prior7) * 100) : 0;
+    const signups7 = series.signups.slice(-7).reduce((sum, n) => sum + n, 0);
+    const priorSignups = series.signups.slice(-14, -7).reduce((sum, n) => sum + n, 0);
+    const signupDelta = priorSignups ? Math.round(((signups7 - priorSignups) / priorSignups) * 100) : 0;
+    const aiCalls = users.reduce((sum, user) => sum + user.aiCalls, 0);
+    const aiPct = Math.min(100, Math.round((aiCalls / admin.aiCap) * 100));
+    const activePct = users.length ? Math.round((active / users.length) * 100) : 0;
+    const adminUi = app.adminUiState;
+    const query = adminUi.query || "";
+    const roleFilter = adminUi.role || "all";
+    const statusFilter = adminUi.status || "all";
+    const selected = adminUi.user ? users.find((user) => user.id === Number(adminUi.user)) : null;
+    const option = (value, label, current) => `<option value="${value}"${current === value ? " selected" : ""}>${label}</option>`;
+
+    const rows = users.map((user, index) => {
+      const status = adminStatusOf(user);
+      const tone = SL.TONES[index % SL.TONES.length];
+      return `<tr class="admin-user" data-user-row data-action="admin-user" data-id="${user.id}" data-name="${esc(user.name.toLowerCase())}" data-email="${esc(user.email.toLowerCase())}" data-role="${user.role}" data-status="${user.status}" data-risk="${status === "risk" ? "1" : "0"}" data-courses="${esc(user.courses.join(" ").toLowerCase())}" tabindex="0" role="button" aria-label="View ${esc(user.name)}">
+        <td>
+          <span class="admin-user__person">
+            <span class="avatar avatar--sm ${tone}" aria-hidden="true">${esc(app.initialsOf(user.name))}</span>
+            <span>
+              <span class="admin-user__name">${esc(user.name)}</span>
+              <span class="admin-user__email">${esc(user.email)}</span>
+            </span>
+          </span>
+        </td>
+        <td class="admin-col-role">${user.role === "admin" ? "Admin" : "Member"}</td>
+        <td>${adminStatusChip(user)}</td>
+        <td class="admin-user__muted">${adminAgo(user.lastActive)}</td>
+        <td class="admin-col-reviews admin-user__num">${user.reviews7d}</td>
+        <td class="admin-col-ai admin-user__num">${user.aiCalls}</td>
+      </tr>`;
+    }).join("");
+
+    const insights = [
+      adminInsight(
+        "tone-butter",
+        "clock",
+        `${SL.plural(atRisk, "learner")} idle 7+ days`,
+        "Their loop has gone quiet. Check in or review access.",
+        `<button class="btn btn--ghost btn--sm" type="button" data-action="admin-filter" data-filter="risk">View</button>`
+      ),
+      adminInsight(
+        "tone-rose",
+        "eye",
+        `${SL.plural(disabled, "account")} disabled`,
+        "Access stays blocked until re-enabled.",
+        `<button class="btn btn--ghost btn--sm" type="button" data-action="admin-filter" data-filter="disabled">View</button>`
+      ),
+      adminInsight(
+        "tone-sage",
+        "plus",
+        `${SL.plural(signups7, "signup")} this week`,
+        `${signupDelta >= 0 ? "Up" : "Down"} ${Math.abs(signupDelta)}% from the prior week.`,
+        ""
+      ),
+    ].join("");
+
+    return `<section class="screen screen--admin">
+      <div class="admin${selected ? " has-detail" : ""}">
+        <aside class="admin__side">
+          <div class="admin__brand">
+            <span class="admin__mark" aria-hidden="true">${icon("layers", 18)}</span>
+            <span class="admin__brand-text"><strong>StudyLoop</strong><span>Admin</span></span>
+          </div>
+          <nav class="admin__nav" aria-label="Admin sections">
+            <button class="admin__nav-item is-active" type="button" data-action="admin-scroll" data-target="adminTop">${icon("home", 18)}<span>Overview</span></button>
+            <button class="admin__nav-item" type="button" data-action="admin-scroll" data-target="adminUsers">${icon("library", 18)}<span>Users</span></button>
+            <button class="admin__nav-item" type="button" data-action="admin-scroll" data-target="adminUsage">${icon("key", 18)}<span>Usage</span></button>
+          </nav>
+          <div class="admin__side-foot">
+            <a class="admin__nav-item" href="#/home" data-nav="#/home">${icon("back", 18)}<span>Back to app</span></a>
+            <button class="admin__nav-item" type="button" data-action="logout">${icon("logout", 18)}<span>Sign out</span></button>
+            <p class="admin__side-user">${esc(app.state.user ? app.state.user.email : "demo@studyloop.app")}</p>
+          </div>
+        </aside>
+
+        <div class="admin__main">
+          <header class="admin__top" id="adminTop">
+            <div>
+              <p class="eyebrow">Admin workspace</p>
+              <h1 class="h1">Dashboard</h1>
+              <p class="small muted">${SL.plural(users.length, "learner")} · mock data, changes stay in this browser</p>
+            </div>
+            <div class="admin__top-actions">
+              <span class="chip chip--plain">Mock data</span>
+              <span class="avatar avatar--sm" aria-hidden="true">${esc(app.state.user ? app.initialsOf(app.state.user.name) : "AD")}</span>
+            </div>
+          </header>
+
+          <div class="admin__scroll">
+            <section class="admin-kpis" aria-label="Key metrics">
+              ${adminMetric("Total users", users.length, `+${newThisMonth} this month`)}
+              ${adminMetric("Active learners", active, `${activePct}% active in the last 7 days`)}
+              ${adminMetric("Reviews · 7d", reviews7, `${reviewDelta >= 0 ? "+" : ""}${reviewDelta}% vs prior week`)}
+              ${adminMetric("At risk", atRisk, "No activity in 7+ days", "admin-kpi--warn")}
+            </section>
+
+            <div class="admin-grid">
+              <section class="admin-card" id="adminUsage">
+                <div class="admin-card__head">
+                  <div>
+                    <p class="eyebrow">Engagement</p>
+                    <h2 class="h3">Reviews per day</h2>
+                  </div>
+                  <div class="admin-legend">
+                    <span><i></i>Last 7 days</span>
+                    <span><i class="is-muted"></i>Prior</span>
+                  </div>
+                </div>
+                ${adminBars(series.reviews, { label: "Reviews per day over the last 14 days" })}
+                <div class="admin-chart__axis"><span>14 days ago</span><span>Today</span></div>
+                <div class="admin-chart__foot">
+                  <div><strong>${reviews7}</strong><span>reviews this week</span></div>
+                  <div><strong>${reviewDelta >= 0 ? "+" : ""}${reviewDelta}%</strong><span>vs prior week</span></div>
+                  <div><strong>${aiCalls}</strong><span>AI calls this month</span></div>
+                </div>
+              </section>
+
+              <section class="admin-card admin-attention">
+                <div class="admin-card__head">
+                  <div>
+                    <p class="eyebrow">Action queue</p>
+                    <h2 class="h3">Needs attention</h2>
+                  </div>
+                  <span class="badge badge--neutral">${atRisk + disabled}</span>
+                </div>
+                <div class="admin-insights">${insights}</div>
+                <div class="admin-usage">
+                  <div class="admin-usage__row">
+                    <span class="small"><strong>AI key usage</strong></span>
+                    <span class="small num">${aiCalls} / ${admin.aiCap}</span>
+                  </div>
+                  <div class="admin-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${aiPct}" aria-label="AI key usage">
+                    <span style="width:${aiPct}%"></span>
+                  </div>
+                  <p class="tiny muted">${aiPct}% of the monthly shared key budget.</p>
+                </div>
+              </section>
+            </div>
+
+            <section class="admin-card admin-users" id="adminUsers">
+              <div class="admin-users__head">
+                <div>
+                  <p class="eyebrow">Directory</p>
+                  <h2 class="h3">Users</h2>
+                </div>
+                <span class="admin-count" id="adminCount">${users.length} of ${users.length} users</span>
+              </div>
+              <div class="admin-toolbar">
+                <label class="admin-search">
+                  <span class="sr-only">Search users</span>
+                  ${icon("search", 16)}
+                  <input class="input" id="adminSearch" type="search" placeholder="Search name, email, or course" value="${esc(query)}" autocomplete="off" />
+                </label>
+                <label class="sr-only" for="adminRole">Filter by role</label>
+                <select class="admin-select" id="adminRole">
+                  ${option("all", "All roles", roleFilter)}
+                  ${option("admin", "Admins", roleFilter)}
+                  ${option("member", "Members", roleFilter)}
+                </select>
+                <label class="sr-only" for="adminStatus">Filter by status</label>
+                <select class="admin-select" id="adminStatus">
+                  ${option("all", "All statuses", statusFilter)}
+                  ${option("active", "Active", statusFilter)}
+                  ${option("risk", "At risk", statusFilter)}
+                  ${option("disabled", "Disabled", statusFilter)}
+                </select>
+              </div>
+              <div class="admin-table-wrap">
+                <table class="admin-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">User</th>
+                      <th scope="col" class="admin-col-role">Role</th>
+                      <th scope="col">Status</th>
+                      <th scope="col">Last active</th>
+                      <th scope="col" class="admin-col-reviews">Reviews 7d</th>
+                      <th scope="col" class="admin-col-ai">AI calls</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${rows}
+                    <tr id="adminNoResults" hidden><td colspan="6" class="admin-empty">No users match those filters.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <aside class="admin-detail" id="adminDetail" aria-hidden="${selected ? "false" : "true"}" aria-label="User details">
+          ${selected ? ui.adminDetail(selected.id) : ""}
+        </aside>
+      </div>
+    </section>`;
+  };
+
+  ui.adminDetail = function adminDetail(id) {
+    const app = SL.app;
+    const user = app.adminUserById(id);
+    if (!user) return "";
+    const status = adminStatusOf(user);
+    const courses = user.courses.map((course) => `<span class="chip">${esc(course)}</span>`).join("");
+    const weeklyTarget = 60;
+    const weeklyPct = Math.min(100, Math.round((user.reviews7d / weeklyTarget) * 100));
+    return `<div class="admin-detail__head">
+        <div class="admin-detail__id">
+          <span class="avatar" aria-hidden="true">${esc(app.initialsOf(user.name))}</span>
+          <div>
+            <h2 class="h2">${esc(user.name)}</h2>
+            <p class="small muted">${esc(user.email)}</p>
+          </div>
+        </div>
+        <button class="icon-btn" type="button" data-action="admin-close-user" aria-label="Close user details">${icon("close")}</button>
+      </div>
+      <div class="admin-detail__badges">
+        ${adminStatusChip(user)}
+        <span class="chip chip--plain">${user.role === "admin" ? "Admin" : "Member"}</span>
+        <span class="chip chip--plain">${user.plan === "pro" ? "Pro plan" : "Free plan"}</span>
+      </div>
+      <div class="admin-detail__meta">
+        <div><span class="eyebrow">Joined</span><strong>${adminDate(user.joined)}</strong></div>
+        <div><span class="eyebrow">Last active</span><strong>${adminAgo(user.lastActive)}</strong></div>
+      </div>
+      <div class="admin-detail__stats">
+        <div class="admin-stat"><strong>${user.notebooks}</strong><span>notebooks</span></div>
+        <div class="admin-stat"><strong>${user.sources}</strong><span>sources</span></div>
+        <div class="admin-stat"><strong>${user.cards}</strong><span>cards</span></div>
+        <div class="admin-stat"><strong>${user.reviews}</strong><span>reviews all time</span></div>
+      </div>
+      <div class="admin-detail__block">
+        <div class="section-head"><h3 class="h3">This week</h3><span class="small muted">${user.reviews7d} reviews · ${user.aiCalls7d} AI</span></div>
+        <div class="admin-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${weeklyPct}" aria-label="Weekly review progress">
+          <span style="width:${weeklyPct}%"></span>
+        </div>
+        <p class="tiny muted">${user.reviews7d ? `${weeklyPct}% of a 60-review week.` : "No reviews in the last 7 days."}</p>
+      </div>
+      <div class="admin-detail__block">
+        <p class="eyebrow">Courses</p>
+        <div class="admin-chips">${courses || `<span class="small muted">No notebooks yet.</span>`}</div>
+      </div>
+      <div class="admin-detail__actions">
+        <button class="btn btn--secondary btn--sm" type="button" data-action="admin-reset-password" data-id="${user.id}">${icon("key", 15)} Reset password</button>
+        <button class="btn btn--ghost btn--sm" type="button" data-action="admin-toggle-status" data-id="${user.id}">
+          ${status === "disabled" ? `${icon("check", 15)} Enable account` : `${icon("eye", 15)} Disable account`}
+        </button>
+        <button class="btn btn--danger btn--sm" type="button" data-action="admin-delete-user" data-id="${user.id}">${icon("trash", 15)} Delete user</button>
+      </div>`;
+  };
+
   ui.home = function homeScreen() {
     const app = SL.app;
     const state = app.state;
@@ -92,8 +425,11 @@ SL.ui = SL.ui || {};
             ${app.ring(pct / 100, { size: 96, label: "mastery" })}
           </div>
           <div class="hero__foot">
-            <span class="small" style="color:rgba(247,243,231,.76)">${due ? `${SL.plural(due, "card")} due today` : "All caught up"}</span>
-            <a class="btn btn--sm" href="${due ? "#/review" : "#/library"}">${due ? "Review" : "Add material"} ${icon("arrow", 16)}</a>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span class="small" style="color:rgba(247,243,231,.76)">${due ? `${SL.plural(due, "card")} due today` : "All caught up"}</span>
+              <a class="btn btn--ai btn--sm" href="#/library" aria-label="Generate flashcards">${icon("sparkle", 14)} Generate flashcards</a>
+            </div>
+            <a class="btn btn--sm btn--outline" href="${due ? "#/review" : "#/library"}" style="margin-top:8px">${due ? "Review" : "Add material"} ${icon("arrow", 16)}</a>
           </div>
         </section>
 

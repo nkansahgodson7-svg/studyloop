@@ -263,6 +263,61 @@ window.SL = window.SL || {};
 
   SL.GENERIC_SUGGESTIONS = ["Summarize these sources", "Quiz me on this material", "Explain the key idea"];
 
+  SL.adminSeed = function () {
+    const now = Date.now();
+    const iso = (ago) => new Date(now - ago).toISOString();
+    const H = 3600000;
+    const D = 86400000;
+    const rows = [
+      [1, "Ada Lovelace", "ada@studyloop.app", "admin", "active", 180, 1, 3, 412, 46, 128, 14, ["Organic Chemistry", "World History", "Calculus II"]],
+      [2, "Marcus Chen", "marcus.chen@uni.edu", "member", "active", 92, 3, 4, 286, 31, 94, 9, ["Biology", "Statistics"]],
+      [3, "Priya Raman", "priya@uni.edu", "member", "active", 27, 24, 2, 198, 22, 61, 7, ["Organic Chemistry", "Calculus II"]],
+      [4, "Jonah Park", "jonah.park@uni.edu", "member", "active", 19, 48, 3, 154, 18, 40, 5, ["Physics", "Calculus II"]],
+      [5, "Sofia Alvarez", "sofia@uni.edu", "member", "active", 210, 4, 6, 523, 39, 210, 22, ["Psychology", "Macroeconomics"]],
+      [6, "Liam O'Connor", "liam@uni.edu", "member", "active", 74, 216, 2, 61, 0, 12, 0, ["World History"]],
+      [7, "Mei Tanaka", "mei@uni.edu", "member", "active", 12, 120, 1, 44, 8, 9, 2, ["Biology"]],
+      [8, "Noah Fischer", "noah@uni.edu", "member", "active", 130, 384, 3, 132, 0, 33, 0, ["Physics", "Statistics"]],
+      [9, "Amara Okafor", "amara@uni.edu", "member", "active", 240, 2, 5, 341, 41, 118, 13, ["Organic Chemistry", "Biology"]],
+      [10, "Ethan Brooks", "ethan@uni.edu", "member", "disabled", 22, 528, 1, 12, 0, 4, 0, ["Psychology"]],
+      [11, "Isabella Rossi", "isabella@uni.edu", "member", "active", 26, 144, 2, 87, 9, 21, 3, ["Macroeconomics"]],
+      [12, "Tom Novak", "tom@uni.edu", "member", "active", 150, 744, 1, 3, 0, 2, 0, ["Statistics"]],
+      [13, "Grace Kim", "grace@uni.edu", "member", "active", 63, 12, 4, 267, 28, 76, 8, ["World History", "Psychology"]],
+      [14, "Daniel Haddad", "daniel@uni.edu", "member", "disabled", 96, 960, 2, 58, 0, 11, 0, ["Calculus II"]],
+      [15, "Yuki Sato", "yuki@uni.edu", "member", "active", 45, 72, 2, 121, 15, 27, 4, ["Biology", "Organic Chemistry"]],
+      [16, "Omar Farouk", "omar@uni.edu", "member", "active", 88, 192, 3, 176, 2, 44, 1, ["Physics"]],
+    ];
+    const users = rows.map((row) => {
+      const [id, name, email, role, status, joinedAgo, activeAgo, notebooks, reviews, reviews7d, aiCalls, aiCalls7d, courses] = row;
+      return {
+        id,
+        name,
+        email,
+        role,
+        status,
+        joined: iso(joinedAgo * D),
+        lastActive: iso(activeAgo * H),
+        notebooks,
+        sources: notebooks * 3,
+        cards: reviews + 12,
+        reviews,
+        reviews7d,
+        aiCalls,
+        aiCalls7d,
+        courses,
+        plan: id % 4 === 0 ? "pro" : "free",
+      };
+    });
+    return {
+      users,
+      aiCap: 1500,
+      series: {
+        reviews: [38, 42, 35, 51, 47, 44, 58, 62, 55, 49, 53, 61, 57, 64],
+        signups: [0, 1, 0, 2, 1, 0, 1, 0, 3, 1, 0, 2, 1, 1],
+        ai: [12, 18, 14, 22, 17, 25, 20, 28, 24, 19, 26, 31, 27, 34],
+      },
+    };
+  };
+
   SL.seed = function () {
     const now = Date.now();
     const iso = (days) => new Date(now + days * 86400000).toISOString();
@@ -320,6 +375,7 @@ window.SL = window.SL || {};
       chats,
       generated,
       settings: { personalKey: false },
+      admin: SL.adminSeed(),
     };
   };
 })(window.SL);

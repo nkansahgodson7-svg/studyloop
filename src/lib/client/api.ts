@@ -24,10 +24,15 @@ export async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 /** Where an auth failure should send the user, if anywhere. */
-export function authRedirectFor(error: unknown): "/login" | "/account-disabled" | null {
+export function authRedirectFor(
+  error: unknown
+): "/login" | "/account-disabled" | "/change-password" | null {
   const status = (error as { status?: number }).status;
   if (status === 403 && (error as { code?: string }).code === "account_disabled") {
     return "/account-disabled";
+  }
+  if (status === 403 && (error as { code?: string }).code === "password_change_required") {
+    return "/change-password";
   }
   return status === 401 ? "/login" : null;
 }

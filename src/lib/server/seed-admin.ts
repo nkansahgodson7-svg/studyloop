@@ -1,6 +1,7 @@
 import { pathToFileURL } from 'node:url';
 import type { Client } from '@libsql/client';
 import { hashPassword } from './crypto';
+import { MIN_PASSWORD_LENGTH } from '../password';
 import { createUser, findUserByEmail } from './repo';
 
 export interface SeedInput {
@@ -16,9 +17,9 @@ export async function seedAdmin(
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     throw Object.assign(new Error('seed-admin requires a valid ADMIN_EMAIL'), { code: 'INVALID_EMAIL' });
   }
-  if (input.password.length < 12) {
+  if (input.password.length < MIN_PASSWORD_LENGTH) {
     throw Object.assign(
-      new Error('seed-admin requires an ADMIN_PASSWORD of at least 12 characters'),
+      new Error(`seed-admin requires an ADMIN_PASSWORD of at least ${MIN_PASSWORD_LENGTH} characters`),
       { code: 'WEAK_PASSWORD' }
     );
   }

@@ -8,6 +8,8 @@
   },
   "scripts": {
     "dev": "next dev",
+    "db:migrate": "tsx src/lib/server/migrate.ts",
+    "prebuild": "npm run db:migrate",
     "build": "next build",
     "start": "next start",
     "test": "vitest run",

@@ -8,7 +8,15 @@ import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
 import { createSession, createUser, listUsers, findUserBySession } from './repo';
 import { requireUser } from './auth';
-import { adminCreateUser, adminListUsers, adminSetDisabled, adminStats, type AdminStats } from './admin';
+import {
+  adminCreateUser,
+  adminDeleteUser,
+  adminListUsers,
+  adminResetPassword,
+  adminSetDisabled,
+  adminStats,
+  type AdminStats
+} from './admin';
 
 const PASSWORD = 'correct horse battery staple';
 
@@ -56,6 +64,9 @@ describe('admin data layer', () => {
       expect(user).toHaveProperty('disabled', false);
     }
     expect(users[0]!.id).toBe(first.id);
+    expect(users[0]!.lastActiveAt).toBeNull();
+    expect(users[0]!.counts).toMatchObject({ notebooks: 0, reviews: 0, chats: 0 });
+    expect(users[0]!.notebooks).toEqual([]);
   });
 });
 
@@ -181,6 +192,13 @@ describe('admin create user', () => {
       email: 'weak@test.local', password: 'short'
     }, adminToken));
     expect(res.status).toBe(400);
+  });
+
+  it('accepts a six-character password', async () => {
+    const res = await adminCreateUser(db, await adminRequest('http://x/api/admin/users', 'POST', {
+      email: 'sixchars@test.local', password: 'sixsix'
+    }, adminToken));
+    expect(res.status).toBe(201);
   });
 
   it('rejects invalid emails with 400', async () => {
@@ -359,9 +377,10 @@ describe('admin stats', () => {
     expect(res.status).toBe(200);
 
     const body = (await res.json()) as AdminStats;
-    expect(body.users).toMatchObject({ total: 2, admins: 1, disabled: 0, newLast7d: 2 });
+    // Sessions count as activity now, so both the admin and the learner are active.
+    expect(body.users).toMatchObject({ total: 2, admins: 1, disabled: 0, newLast7d: 2, atRisk: 0 });
     expect(body.content).toMatchObject({ notebooks: 1, sources: 1, cards: 1 });
-    expect(body.activity).toMatchObject({ reviews: 1, dueNow: 1, chatPrompts: 1, activeUsers7d: 1 });
+    expect(body.activity).toMatchObject({ reviews: 1, dueNow: 1, chatPrompts: 1, activeUsers7d: 2 });
 
     expect(body.series.signups).toHaveLength(14);
     expect(body.series.reviews).toHaveLength(14);
@@ -372,5 +391,115 @@ describe('admin stats', () => {
     expect(body.series.reviews[13]!.count).toBe(1);
 
     expect(JSON.stringify(body)).not.toMatch(/password|pw_hash|gsk_/i);
+  });
+});
+
+describe('admin reset password', () => {
+  let db: Client;
+  let adminId: number;
+  let adminToken: string;
+  let userId: number;
+  let userSession: string;
+
+  beforeAll(async () => {
+    db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-admreset-')), 'reset.db'));
+    await applySchema(db);
+    const admin = await createUser(db, { email: 'reset-admin@test.local', passwordHash: await hashPassword(PASSWORD), role: 'admin' });
+    adminId = admin.id;
+    adminToken = await createSession(db, admin.id);
+    const user = await createUser(db, { email: 'reset-target@test.local', passwordHash: await hashPassword('old-password-123'), role: 'user' });
+    userId = user.id;
+    userSession = await createSession(db, userId);
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it('returns a temporary password, revokes sessions, and the new password works', async () => {
+    const res = await adminResetPassword(db, await adminRequest(`http://x/api/admin/users/${userId}/reset-password`, 'POST', undefined, adminToken), String(userId));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.email).toBe('reset-target@test.local');
+    expect(String(body.temporaryPassword).length).toBeGreaterThanOrEqual(12);
+    expect(typeof body.expiresAt).toBe('string');
+    expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(body).not.toHaveProperty('passwordHash');
+
+    expect(await findUserBySession(db, userSession, new Date())).toBeNull();
+
+    const row = await db.execute({
+      sql: 'SELECT must_change_password, password_expires_at FROM users WHERE id = ?',
+      args: [userId]
+    });
+    expect(Number(row.rows[0]!.must_change_password)).toBe(1);
+    expect(row.rows[0]!.password_expires_at).toBe(body.expiresAt);
+
+    const { login } = await import('./auth');
+    const loginRes = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'reset-target@test.local', password: body.temporaryPassword })
+    }));
+    expect(loginRes.status).toBe(200);
+    expect(await loginRes.json()).toMatchObject({ mustChangePassword: true });
+  });
+
+  it('rejects non-admins, unknown users, and resetting your own account', async () => {
+    const userToken = await createSession(db, userId);
+    expect((await adminResetPassword(db, await adminRequest(`http://x/api/admin/users/${userId}/reset-password`, 'POST', undefined, userToken), String(userId))).status).toBe(403);
+    expect((await adminResetPassword(db, await adminRequest('http://x/api/admin/users/999/reset-password', 'POST', undefined, adminToken), '999')).status).toBe(404);
+    expect((await adminResetPassword(db, await adminRequest(`http://x/api/admin/users/${adminId}/reset-password`, 'POST', undefined, adminToken), String(adminId))).status).toBe(400);
+  });
+});
+
+describe('admin delete user', () => {
+  let db: Client;
+  let adminToken: string;
+  let adminId: number;
+  let targetId: number;
+
+  beforeAll(async () => {
+    db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-admdel-')), 'delete.db'));
+    await applySchema(db);
+    const admin = await createUser(db, { email: 'delete-admin@test.local', passwordHash: await hashPassword(PASSWORD), role: 'admin' });
+    adminId = admin.id;
+    adminToken = await createSession(db, admin.id);
+    const target = await createUser(db, { email: 'delete-target@test.local', passwordHash: await hashPassword(PASSWORD), role: 'user' });
+    targetId = target.id;
+
+    const notebook = await db.execute({ sql: 'INSERT INTO notebooks (user_id, title) VALUES (?, ?)', args: [targetId, 'Delete me'] });
+    const notebookId = Number(notebook.lastInsertRowid);
+    const source = await db.execute({ sql: 'INSERT INTO sources (notebook_id, kind, title, text) VALUES (?, ?, ?, ?)', args: [notebookId, 'text', 'Source', 'body'] });
+    const card = await db.execute({ sql: 'INSERT INTO cards (notebook_id, front, back) VALUES (?, ?, ?)', args: [notebookId, 'front', 'back'] });
+    const cardId = Number(card.lastInsertRowid);
+    await db.execute({ sql: 'INSERT INTO reviews (card_id, due) VALUES (?, ?)', args: [cardId, new Date().toISOString()] });
+    await db.execute({ sql: 'INSERT INTO review_log (card_id, rating) VALUES (?, 3)', args: [cardId] });
+    await db.execute({ sql: 'INSERT INTO chat_messages (notebook_id, role, content) VALUES (?, ?, ?)', args: [notebookId, 'user', 'hi'] });
+    await db.execute({ sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, 0, ?)', args: [Number(source.lastInsertRowid), 'body'] });
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it('deletes the user and everything they own', async () => {
+    const res = await adminDeleteUser(db, await adminRequest(`http://x/api/admin/users/${targetId}`, 'DELETE', undefined, adminToken), String(targetId));
+    expect(res.status).toBe(200);
+    const userCount = await db.execute({ sql: 'SELECT COUNT(*) n FROM users WHERE id = ?', args: [targetId] });
+    expect(Number(userCount.rows[0]!.n)).toBe(0);
+    for (const table of ['notebooks', 'sources', 'source_chunks', 'cards', 'reviews', 'review_log', 'chat_messages']) {
+      const count = await db.execute(`SELECT COUNT(*) n FROM ${table}`);
+      expect(Number(count.rows[0]!.n)).toBe(0);
+    }
+  });
+
+  it('refuses to delete yourself, unknown users, and the last admin', async () => {
+    expect((await adminDeleteUser(db, await adminRequest(`http://x/api/admin/users/${adminId}`, 'DELETE', undefined, adminToken), String(adminId))).status).toBe(400);
+    expect((await adminDeleteUser(db, await adminRequest('http://x/api/admin/users/999', 'DELETE', undefined, adminToken), '999')).status).toBe(404);
+
+    const other = await createUser(db, { email: 'other-admin@test.local', passwordHash: await hashPassword(PASSWORD), role: 'admin' });
+    expect((await adminDeleteUser(db, await adminRequest(`http://x/api/admin/users/${other.id}`, 'DELETE', undefined, adminToken), String(other.id))).status).toBe(200);
+    expect((await adminDeleteUser(db, await adminRequest(`http://x/api/admin/users/${adminId}`, 'DELETE', undefined, adminToken), String(adminId))).status).toBe(400);
   });
 });

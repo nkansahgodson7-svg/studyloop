@@ -3,13 +3,17 @@ import { type } from 'arktype';
 import { NextResponse } from 'next/server';
 import { hashPassword, verifyPassword, verifySecret } from './crypto';
 import { clientIp, rateLimit } from './ratelimit';
+import { MIN_PASSWORD_LENGTH } from '../password';
 import {
   createSession,
   createUser,
   findUserByEmail,
   findUserBySession,
+  getUser,
   isUniqueViolation,
+  revokeOtherSessionsForUser,
   revokeSession,
+  updateUserPassword,
   type SessionUser,
   type UserRow
 } from './repo';
@@ -39,6 +43,19 @@ export function readSessionToken(req: Request): string | null {
   return null;
 }
 
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+  '/api/auth/me',
+  '/api/auth/change-password'
+]);
+
+function requestPathname(req: Request): string {
+  try {
+    return new URL(req.url).pathname;
+  } catch {
+    return '';
+  }
+}
+
 export async function requireUser(db: Client, req: Request): Promise<SessionUser> {
   const token = readSessionToken(req);
   const user = token ? await findUserBySession(db, token, new Date()) : null;
@@ -47,6 +64,12 @@ export async function requireUser(db: Client, req: Request): Promise<SessionUser
   }
   if (user.disabled) {
     throw new HttpError(403, 'account disabled', 'account_disabled');
+  }
+  if (
+    user.mustChangePassword &&
+    !PASSWORD_CHANGE_ALLOWED_PATHS.has(requestPathname(req))
+  ) {
+    throw new HttpError(403, 'password change required', 'password_change_required');
   }
   return user;
 }
@@ -79,8 +102,6 @@ export const cookieBase = {
 
 const SESSION_MAX_AGE = 7 * 24 * 3600;
 
-const MIN_SIGNUP_PASSWORD_LENGTH = 8;
-
 const Credentials = type({
   email: 'string.email',
   password: 'string'
@@ -92,6 +113,11 @@ const SignupBody = type({
   inviteCode: 'string'
 });
 
+const ChangePasswordBody = type({
+  currentPassword: 'string',
+  newPassword: 'string'
+});
+
 async function issueSession(db: Client, user: UserRow, status = 200): Promise<NextResponse> {
   const token = await createSession(db, user.id);
   const res = NextResponse.json(
@@ -99,7 +125,8 @@ async function issueSession(db: Client, user: UserRow, status = 200): Promise<Ne
       id: user.id,
       email: user.email,
       role: user.role,
-      hasPersonalKey: user.llmKeyEncrypted != null
+      hasPersonalKey: user.llmKeyEncrypted != null,
+      mustChangePassword: user.mustChangePassword
     },
     { status }
   );
@@ -128,6 +155,15 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
   }
   if (user.disabled) {
     return NextResponse.json({ error: 'account disabled' }, { status: 403 });
+  }
+  if (user.passwordExpiresAt && new Date(user.passwordExpiresAt) <= new Date()) {
+    return NextResponse.json(
+      {
+        error: 'temporary password expired — ask an admin to reset it',
+        code: 'password_expired'
+      },
+      { status: 403 }
+    );
   }
 
   return issueSession(db, user);
@@ -171,9 +207,9 @@ export async function signup(
     return NextResponse.json({ error: 'invalid invite code' }, { status: 403 });
   }
 
-  if (body.password.length < MIN_SIGNUP_PASSWORD_LENGTH) {
+  if (body.password.length < MIN_PASSWORD_LENGTH) {
     return NextResponse.json(
-      { error: `password requires at least ${MIN_SIGNUP_PASSWORD_LENGTH} characters` },
+      { error: `password requires at least ${MIN_PASSWORD_LENGTH} characters` },
       { status: 400 }
     );
   }
@@ -191,6 +227,64 @@ export async function signup(
     }
     throw error;
   }
+}
+
+export async function changePassword(db: Client, req: Request): Promise<NextResponse> {
+  let user: SessionUser;
+  try {
+    user = await requireUser(db, req);
+    const gate = rateLimit(`change-password:${user.id}`);
+    if (!gate.allowed) {
+      const res = NextResponse.json(
+        { error: 'too many attempts — try again later' },
+        { status: 429 }
+      );
+      res.headers.set('retry-after', String(gate.retryAfterSeconds));
+      return res;
+    }
+  } catch (error) {
+    return errorResponse(error);
+  }
+
+  let parsedBody: unknown;
+  try {
+    parsedBody = await req.json();
+  } catch {
+    return NextResponse.json({ error: 'invalid JSON body' }, { status: 400 });
+  }
+
+  const body = ChangePasswordBody(parsedBody);
+  if (body instanceof type.errors) {
+    return NextResponse.json(
+      { error: 'current password and new password required' },
+      { status: 400 }
+    );
+  }
+  if (body.newPassword.length < MIN_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `password requires at least ${MIN_PASSWORD_LENGTH} characters` },
+      { status: 400 }
+    );
+  }
+
+  const record = await getUser(db, user.id);
+  if (!(await verifyPassword(body.currentPassword, record.passwordHash))) {
+    return NextResponse.json({ error: 'current password is incorrect' }, { status: 400 });
+  }
+  if (body.newPassword === body.currentPassword) {
+    return NextResponse.json(
+      { error: 'new password must be different from the current password' },
+      { status: 400 }
+    );
+  }
+
+  await updateUserPassword(db, user.id, await hashPassword(body.newPassword));
+  const token = readSessionToken(req);
+  if (token) {
+    await revokeOtherSessionsForUser(db, user.id, token);
+  }
+
+  return NextResponse.json({ ok: true, role: user.role });
 }
 
 export async function logout(db: Client, req: Request): Promise<NextResponse> {
