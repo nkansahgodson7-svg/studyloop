@@ -14,8 +14,7 @@ import {
   updateUserPassword
 } from './repo';
 import { errorResponse, requireAdmin } from './auth';
-
-const MIN_PASSWORD_LENGTH = 12;
+import { MIN_PASSWORD_LENGTH } from '../password';
 
 const NewUserBody = type({
   email: 'string.email',
@@ -134,14 +133,17 @@ async function findTargetUser(
   };
 }
 
-/** 19 characters, URL-safe, and long enough for the 12-character minimum. */
+const TEMP_PASSWORD_TTL_MS = 24 * 3600 * 1000;
+
+/** 19 characters, URL-safe, and well above the shared password minimum. */
 export function temporaryPassword(): string {
   return `sl-${randomBytes(12).toString('base64url')}`;
 }
 
 export async function adminResetPassword(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  let admin: Awaited<ReturnType<typeof requireAdmin>>;
   try {
-    await requireAdmin(db, req);
+    admin = await requireAdmin(db, req);
   } catch (error) {
     return errorResponse(error);
   }
@@ -150,19 +152,30 @@ export async function adminResetPassword(db: Client, req: Request, idRaw: string
   if (id === null) {
     return NextResponse.json({ error: 'unknown user' }, { status: 404 });
   }
+  if (id === admin.id) {
+    return NextResponse.json(
+      { error: 'use the change password page to update your own password' },
+      { status: 400 }
+    );
+  }
   const target = await findTargetUser(db, id);
   if (!target) {
     return NextResponse.json({ error: 'unknown user' }, { status: 404 });
   }
 
   const password = temporaryPassword();
-  await updateUserPassword(db, id, await hashPassword(password));
+  const expiresAt = new Date(Date.now() + TEMP_PASSWORD_TTL_MS).toISOString();
+  await updateUserPassword(db, id, await hashPassword(password), {
+    mustChangePassword: true,
+    passwordExpiresAt: expiresAt
+  });
   await revokeAllSessionsForUser(db, id);
   return NextResponse.json({
     ok: true,
     id,
     email: target.email,
-    temporaryPassword: password
+    temporaryPassword: password,
+    expiresAt
   });
 }
 

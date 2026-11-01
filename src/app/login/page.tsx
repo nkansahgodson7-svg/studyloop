@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useToast } from "@/components/ui/Toast";
 import { clearSessionCaches } from "@/lib/client/cache";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 function nameFromEmail(email: string): string {
   const prefix = email.split("@")[0] || "learner";
@@ -31,8 +32,8 @@ export default function LoginPage() {
       setError("Enter a valid email address.");
       return;
     }
-    if (nextPassword.length < 6) {
-      setError("Password must be at least 6 characters.");
+    if (nextPassword.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least  characters.`);
       return;
     }
     setSubmitting(true);
@@ -43,10 +44,16 @@ export default function LoginPage() {
         body: JSON.stringify({ email: nextEmail, password: nextPassword })
       });
       if (res.ok) {
-        const body = (await res.json().catch(() => null)) as { role?: string } | null;
+        const body = (await res.json().catch(() => null)) as
+          | { role?: string; mustChangePassword?: boolean }
+          | null;
         const name = nameFromEmail(nextEmail);
         toast(`Welcome back, ${name.split(" ")[0]}`);
         clearSessionCaches();
+        if (body?.mustChangePassword) {
+          router.replace("/change-password");
+          return;
+        }
         // Admins land on their dashboard; the app is one tap away from there.
         router.replace(body?.role === "admin" ? "/admin" : "/");
         return;
@@ -107,7 +114,7 @@ export default function LoginPage() {
               autoComplete="current-password"
               placeholder="Your password"
               required
-              minLength={6}
+              minLength={MIN_PASSWORD_LENGTH}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />

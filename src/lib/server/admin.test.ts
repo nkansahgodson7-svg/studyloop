@@ -194,6 +194,13 @@ describe('admin create user', () => {
     expect(res.status).toBe(400);
   });
 
+  it('accepts a six-character password', async () => {
+    const res = await adminCreateUser(db, await adminRequest('http://x/api/admin/users', 'POST', {
+      email: 'sixchars@test.local', password: 'sixsix'
+    }, adminToken));
+    expect(res.status).toBe(201);
+  });
+
   it('rejects invalid emails with 400', async () => {
     const res = await adminCreateUser(db, await adminRequest('http://x/api/admin/users', 'POST', {
       email: 'not-an-email', password: 'long-enough-password'
@@ -389,6 +396,7 @@ describe('admin stats', () => {
 
 describe('admin reset password', () => {
   let db: Client;
+  let adminId: number;
   let adminToken: string;
   let userId: number;
   let userSession: string;
@@ -397,6 +405,7 @@ describe('admin reset password', () => {
     db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-admreset-')), 'reset.db'));
     await applySchema(db);
     const admin = await createUser(db, { email: 'reset-admin@test.local', passwordHash: await hashPassword(PASSWORD), role: 'admin' });
+    adminId = admin.id;
     adminToken = await createSession(db, admin.id);
     const user = await createUser(db, { email: 'reset-target@test.local', passwordHash: await hashPassword('old-password-123'), role: 'user' });
     userId = user.id;
@@ -413,9 +422,18 @@ describe('admin reset password', () => {
     const body = await res.json();
     expect(body.email).toBe('reset-target@test.local');
     expect(String(body.temporaryPassword).length).toBeGreaterThanOrEqual(12);
+    expect(typeof body.expiresAt).toBe('string');
+    expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
     expect(body).not.toHaveProperty('passwordHash');
 
     expect(await findUserBySession(db, userSession, new Date())).toBeNull();
+
+    const row = await db.execute({
+      sql: 'SELECT must_change_password, password_expires_at FROM users WHERE id = ?',
+      args: [userId]
+    });
+    expect(Number(row.rows[0]!.must_change_password)).toBe(1);
+    expect(row.rows[0]!.password_expires_at).toBe(body.expiresAt);
 
     const { login } = await import('./auth');
     const loginRes = await login(db, new Request('http://x/api/auth/login', {
@@ -424,12 +442,15 @@ describe('admin reset password', () => {
       body: JSON.stringify({ email: 'reset-target@test.local', password: body.temporaryPassword })
     }));
     expect(loginRes.status).toBe(200);
+    expect(await loginRes.json()).toMatchObject({ mustChangePassword: true });
+    expect(loginRes.cookies.get('sl_force_change')?.value).toBe('1');
   });
 
-  it('rejects non-admins and unknown users', async () => {
+  it('rejects non-admins, unknown users, and resetting your own account', async () => {
     const userToken = await createSession(db, userId);
     expect((await adminResetPassword(db, await adminRequest(`http://x/api/admin/users/${userId}/reset-password`, 'POST', undefined, userToken), String(userId))).status).toBe(403);
     expect((await adminResetPassword(db, await adminRequest('http://x/api/admin/users/999/reset-password', 'POST', undefined, adminToken), '999')).status).toBe(404);
+    expect((await adminResetPassword(db, await adminRequest(`http://x/api/admin/users/${adminId}/reset-password`, 'POST', undefined, adminToken), String(adminId))).status).toBe(400);
   });
 });
 

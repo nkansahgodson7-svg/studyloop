@@ -6,8 +6,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
-import { createSession, createUser } from './repo';
-import { requireAdmin, requireUser, HttpError, login, logout, me, signup } from './auth';
+import { createSession, createUser, findUserBySession, updateUserPassword } from './repo';
+import {
+  changePassword,
+  requireAdmin,
+  requireUser,
+  HttpError,
+  login,
+  logout,
+  me,
+  signup
+} from './auth';
 import { resetRateLimits } from './ratelimit';
 import { seedAdmin } from './seed-admin';
 
@@ -174,6 +183,116 @@ describe('login route', () => {
   });
 });
 
+describe('change password route', () => {
+  let dir: string;
+  let db: Client;
+
+  beforeAll(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'studyloop-changepw-'));
+    db = makeLocalDb(join(dir, 'change-password.db'));
+    await applySchema(db);
+  });
+
+  beforeEach(() => {
+    resetRateLimits();
+  });
+
+  afterAll(async () => {
+    await db.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  async function seedTemporaryUser(email: string, expiresAt: string) {
+    const user = await createUser(db, {
+      email,
+      passwordHash: await hashPassword('temp-password'),
+      role: 'user'
+    });
+    await updateUserPassword(db, user.id, await hashPassword('temp-password'), {
+      mustChangePassword: true,
+      passwordExpiresAt: expiresAt
+    });
+    return user;
+  }
+
+  function changeRequest(token: string, currentPassword: string, newPassword: string): Request {
+    return new Request('http://x/api/auth/change-password', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        cookie: `sl_session=${token}`
+      },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+  }
+
+  it('updates the password, clears the forced-change flag, and keeps only the current session', async () => {
+    const user = await seedTemporaryUser(
+      'change.user@test.local',
+      new Date(Date.now() + 60_000).toISOString()
+    );
+    const token = await createSession(db, user.id);
+    await createSession(db, user.id);
+
+    const res = await changePassword(db, changeRequest(token, 'temp-password', 'new-password'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, role: 'user' });
+    expect(res.cookies.get('sl_force_change')?.maxAge).toBe(0);
+
+    const session = await findUserBySession(db, token, new Date());
+    expect(session?.mustChangePassword).toBe(false);
+    const sessions = await db.execute({
+      sql: 'SELECT COUNT(*) AS n FROM sessions WHERE user_id = ?',
+      args: [user.id]
+    });
+    expect(Number(sessions.rows[0]!.n)).toBe(1);
+
+    const loginRes = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: user.email, password: 'new-password' })
+    }));
+    expect(loginRes.status).toBe(200);
+    expect(await loginRes.json()).toMatchObject({ mustChangePassword: false });
+
+    const oldLogin = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: user.email, password: 'temp-password' })
+    }));
+    expect(oldLogin.status).toBe(401);
+  });
+
+  it('rejects an incorrect current password, a short new password, and an unchanged password', async () => {
+    const user = await seedTemporaryUser(
+      'change.invalid@test.local',
+      new Date(Date.now() + 60_000).toISOString()
+    );
+    const token = await createSession(db, user.id);
+
+    expect((await changePassword(db, changeRequest(token, 'wrong', 'new-password'))).status).toBe(400);
+    expect((await changePassword(db, changeRequest(token, 'temp-password', 'short'))).status).toBe(400);
+    expect(
+      (await changePassword(db, changeRequest(token, 'temp-password', 'temp-password'))).status
+    ).toBe(400);
+  });
+
+  it('rejects an expired temporary password at login', async () => {
+    const user = await seedTemporaryUser(
+      'change.expired@test.local',
+      new Date(Date.now() - 60_000).toISOString()
+    );
+
+    const res = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: user.email, password: 'temp-password' })
+    }));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'password_expired' });
+  });
+});
+
 describe('signup route', () => {
   const INVITE = 'invite-code-for-tests-123';
   let dir: string;
@@ -273,6 +392,15 @@ describe('signup route', () => {
       INVITE
     );
     expect(res.status).toBe(400);
+  });
+
+  it('accepts a six-character password', async () => {
+    const res = await signup(
+      db,
+      signupRequest('six@test.local', 'sixsix', INVITE),
+      INVITE
+    );
+    expect(res.status).toBe(201);
   });
 
   it('rejects malformed JSON with 400', async () => {

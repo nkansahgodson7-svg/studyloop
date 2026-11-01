@@ -118,6 +118,24 @@ export default function SettingsPage() {
 
         <section className="stack--8">
           <div className="section-head" style={{ marginBottom: 2 }}>
+            <h2>Account</h2>
+          </div>
+          <button className="setting-row" type="button" onClick={() => router.push("/change-password")}>
+            <span className="setting-row__icon">
+              <Icon name="key" size={18} />
+            </span>
+            <span className="setting-row__main">
+              <span className="setting-row__title">Password</span>
+              <span className="setting-row__sub">Change the password for this account</span>
+            </span>
+            <span className="setting-row__trail">
+              <Icon name="chevron" size={18} />
+            </span>
+          </button>
+        </section>
+
+        <section className="stack--8">
+          <div className="section-head" style={{ marginBottom: 2 }}>
             <h2>AI</h2>
           </div>
           <button className="setting-row" type="button" onClick={openKeySheet}>

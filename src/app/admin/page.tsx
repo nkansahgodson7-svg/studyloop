@@ -260,10 +260,16 @@ export default function AdminPage() {
     try {
       const res = await fetch(`/api/admin/users/${user.id}/reset-password`, { method: "POST" });
       const body = (await res.json().catch(() => null)) as
-        | { temporaryPassword?: string; error?: string }
+        | { temporaryPassword?: string; expiresAt?: string; error?: string }
         | null;
-      if (res.ok && body?.temporaryPassword) {
-        open(<ResetResultSheet email={user.email} password={body.temporaryPassword} />);
+      if (res.ok && body?.temporaryPassword && body.expiresAt) {
+        open(
+          <ResetResultSheet
+            email={user.email}
+            password={body.temporaryPassword}
+            expiresAt={body.expiresAt}
+          />
+        );
         await load("refresh");
         return;
       }
@@ -313,11 +319,15 @@ export default function AdminPage() {
   }
 
   function requestReset(user: AdminUser) {
+    if (me?.id === user.id) {
+      toast("Use Change password to update your own password");
+      return;
+    }
     open(
       <ConfirmSheet
         title="Reset password"
         sub={user.email}
-        body={`Generate a temporary password for ${displayName(user.email)}? Their existing sessions will be signed out.`}
+        body={`Generate a temporary password for ${displayName(user.email)}? Their existing sessions will be signed out, and they must choose a new password at their first sign-in.`}
         label="Generate password"
         danger={false}
         onConfirm={() => void resetPassword(user)}

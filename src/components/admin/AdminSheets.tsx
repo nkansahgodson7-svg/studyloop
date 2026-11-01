@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 export function ConfirmSheet({
   title,
@@ -46,7 +47,15 @@ export function ConfirmSheet({
   );
 }
 
-export function ResetResultSheet({ email, password }: { email: string; password: string }) {
+export function ResetResultSheet({
+  email,
+  password,
+  expiresAt
+}: {
+  email: string;
+  password: string;
+  expiresAt: string;
+}) {
   const { close } = useSheet();
   const { toast } = useToast();
   const [copied, setCopied] = useState(false);
@@ -68,8 +77,9 @@ export function ResetResultSheet({ email, password }: { email: string; password:
       body={
         <div className="stack--8">
           <p className="small text-pretty admin-sheet-text">
-            Share this temporary password securely. It works once until the user changes it, and
-            all of their other sessions have been signed out.
+            Share this temporary password securely. The user must replace it at their first
+            sign-in. It expires {new Date(expiresAt).toLocaleString()}, and their existing sessions
+            have been signed out.
           </p>
           <div className="admin-temp">
             <code>{password}</code>
@@ -144,7 +154,7 @@ export function NewUserSheet({
           </div>
           <div className="field">
             <label className="label" htmlFor="admin-new-password">
-              Password (min 12 chars)
+              Password (min {MIN_PASSWORD_LENGTH} chars)
             </label>
             <input
               className="input"
@@ -152,7 +162,7 @@ export function NewUserSheet({
               name="password"
               type="text"
               autoComplete="new-password"
-              minLength={12}
+              minLength={MIN_PASSWORD_LENGTH}
               required
               disabled={busy}
             />

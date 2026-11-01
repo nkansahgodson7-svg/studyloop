@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS users (
   llm_key_encrypted TEXT,
   role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
   disabled INTEGER NOT NULL DEFAULT 0,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  password_expires_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -189,6 +191,16 @@ export async function applySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute('ALTER TABLE sessions ADD COLUMN created_at TEXT');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute('ALTER TABLE users ADD COLUMN must_change_password INTEGER NOT NULL DEFAULT 0');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute('ALTER TABLE users ADD COLUMN password_expires_at TEXT');
   } catch {
     // column already exists
   }

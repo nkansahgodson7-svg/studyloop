@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 const SESSION_COOKIE = 'sl_session';
+const FORCE_CHANGE_COOKIE = 'sl_force_change';
+const FORCE_CHANGE_PATH = '/change-password';
 const PUBLIC_PATHS = new Set(['/login', '/signup', '/account-disabled']);
 
 /**
@@ -27,21 +29,26 @@ async function hasValidSession(req: NextRequest): Promise<boolean> {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const hasSession = Boolean(req.cookies.get(SESSION_COOKIE)?.value);
+  const mustChangePassword = req.cookies.get(FORCE_CHANGE_COOKIE)?.value === '1';
 
   if (PUBLIC_PATHS.has(pathname)) {
     if (!hasSession) {
       return NextResponse.next();
     }
     if (await hasValidSession(req)) {
-      return NextResponse.redirect(new URL('/', req.url));
+      return NextResponse.redirect(new URL(mustChangePassword ? FORCE_CHANGE_PATH : '/', req.url));
     }
     const res = NextResponse.next();
     res.cookies.delete(SESSION_COOKIE);
+    res.cookies.delete(FORCE_CHANGE_COOKIE);
     return res;
   }
 
   if (!hasSession) {
     return NextResponse.redirect(new URL('/login', req.url));
+  }
+  if (mustChangePassword && pathname !== FORCE_CHANGE_PATH) {
+    return NextResponse.redirect(new URL(FORCE_CHANGE_PATH, req.url));
   }
   return NextResponse.next();
 }

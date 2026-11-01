@@ -10,6 +10,8 @@ export interface UserRow {
   llmKeyEncrypted: string | null;
   role: UserRole;
   disabled: boolean;
+  mustChangePassword: boolean;
+  passwordExpiresAt: string | null;
   createdAt: string;
 }
 
@@ -19,6 +21,7 @@ export interface SessionUser {
   role: UserRole;
   hasPersonalKey: boolean;
   disabled: boolean;
+  mustChangePassword: boolean;
 }
 
 export const SESSION_TTL_DAYS = 7;
@@ -36,7 +39,7 @@ export async function createUser(
 
 export async function getUser(db: Client, id: number): Promise<UserRow> {
   const result = await db.execute({
-    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, created_at FROM users WHERE id = ?',
+    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, must_change_password, password_expires_at, created_at FROM users WHERE id = ?',
     args: [id]
   });
   const row = result.rows[0];
@@ -54,13 +57,15 @@ function rowToUser(row: Record<string, InValue>): UserRow {
     llmKeyEncrypted: (row['llm_key_encrypted'] as string | null) ?? null,
     role: row['role'] === 'admin' ? 'admin' : 'user',
     disabled: Number(row['disabled']) === 1,
+    mustChangePassword: Number(row['must_change_password']) === 1,
+    passwordExpiresAt: (row['password_expires_at'] as string | null) ?? null,
     createdAt: String(row['created_at'])
   };
 }
 
 export async function findEnabledUserByEmail(db: Client, email: string): Promise<UserRow | null> {
   const result = await db.execute({
-    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, created_at FROM users WHERE email = ? AND disabled = 0',
+    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, must_change_password, password_expires_at, created_at FROM users WHERE email = ? AND disabled = 0',
     args: [email.toLowerCase()]
   });
   const row = result.rows[0];
@@ -69,7 +74,7 @@ export async function findEnabledUserByEmail(db: Client, email: string): Promise
 
 export async function findUserByEmail(db: Client, email: string): Promise<UserRow | null> {
   const result = await db.execute({
-    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, created_at FROM users WHERE email = ?',
+    sql: 'SELECT id, email, pw_hash, llm_key_encrypted, role, disabled, must_change_password, password_expires_at, created_at FROM users WHERE email = ?',
     args: [email.toLowerCase()]
   });
   const row = result.rows[0];
@@ -91,7 +96,8 @@ export async function findUserBySession(db: Client, token: string, now: Date): P
   // Disabled accounts are returned so callers can explain *why* access was
   // denied; `requireUser` is responsible for rejecting them.
   const result = await db.execute({
-    sql: `SELECT u.id, u.email, u.role, u.llm_key_encrypted, u.disabled
+    sql: `SELECT u.id, u.email, u.role, u.llm_key_encrypted, u.disabled,
+                 u.must_change_password
           FROM sessions s
           JOIN users u ON u.id = s.user_id
           WHERE s.token = ? AND s.expires_at > ?`,
@@ -106,12 +112,24 @@ export async function findUserBySession(db: Client, token: string, now: Date): P
     email: String(row['email']),
     role: row['role'] === 'admin' ? 'admin' : 'user',
     hasPersonalKey: row['llm_key_encrypted'] != null,
-    disabled: Number(row['disabled']) === 1
+    disabled: Number(row['disabled']) === 1,
+    mustChangePassword: Number(row['must_change_password']) === 1
   };
 }
 
 export async function revokeAllSessionsForUser(db: Client, userId: number): Promise<void> {
   await db.execute({ sql: 'DELETE FROM sessions WHERE user_id = ?', args: [userId] });
+}
+
+export async function revokeOtherSessionsForUser(
+  db: Client,
+  userId: number,
+  keepToken: string
+): Promise<void> {
+  await db.execute({
+    sql: 'DELETE FROM sessions WHERE user_id = ? AND token != ?',
+    args: [userId, keepToken]
+  });
 }
 
 export async function revokeSession(db: Client, token: string): Promise<void> {
@@ -246,8 +264,23 @@ export async function listUsers(db: Client): Promise<AdminUserRow[]> {
   });
 }
 
-export async function updateUserPassword(db: Client, userId: number, passwordHash: string): Promise<void> {
-  await db.execute({ sql: 'UPDATE users SET pw_hash = ? WHERE id = ?', args: [passwordHash, userId] });
+export async function updateUserPassword(
+  db: Client,
+  userId: number,
+  passwordHash: string,
+  options: { mustChangePassword?: boolean; passwordExpiresAt?: string | null } = {}
+): Promise<void> {
+  await db.execute({
+    sql: `UPDATE users
+          SET pw_hash = ?, must_change_password = ?, password_expires_at = ?
+          WHERE id = ?`,
+    args: [
+      passwordHash,
+      options.mustChangePassword ? 1 : 0,
+      options.passwordExpiresAt ?? null,
+      userId
+    ]
+  });
 }
 
 export async function countAdmins(db: Client): Promise<number> {
