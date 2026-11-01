@@ -78,6 +78,28 @@ describe('db: schema + FTS', () => {
     expect(miss.rows).toHaveLength(0);
   });
 
+  it('applySchema upgrades a legacy users table', async () => {
+    const db = makeLocalDb(join(dir, 'legacy.db'));
+    await db.execute(`CREATE TABLE users (
+      id INTEGER PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      pw_hash TEXT NOT NULL,
+      llm_key_encrypted TEXT,
+      role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+      disabled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    )`);
+
+    await applySchema(db);
+    await applySchema(db);
+
+    const columns = await db.execute('PRAGMA table_info(users)');
+    expect(columns.rows.map((row) => row.name)).toEqual(
+      expect.arrayContaining(['must_change_password', 'password_expires_at'])
+    );
+    await db.close();
+  });
+
   it('deleting a notebook cascades chunks and keeps FTS in sync', async () => {
     const { db, source } = await seedNotebookWithChunk('cascade');
     await db.execute({
