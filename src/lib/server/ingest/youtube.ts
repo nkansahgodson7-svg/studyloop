@@ -55,9 +55,22 @@ function youtubeFailure(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
+let innertube: Promise<import('youtubei.js').Innertube> | null = null;
+
+function getInnertube(): Promise<import('youtubei.js').Innertube> {
+  if (!innertube) {
+    innertube = import('youtubei.js')
+      .then(({ Innertube }) => Innertube.create())
+      .catch((error) => {
+        innertube = null; // retry on next request
+        throw error;
+      });
+  }
+  return innertube;
+}
+
 async function realFetchTranscript(videoId: string): Promise<FetchedTranscript> {
-  const { Innertube } = await import('youtubei.js');
-  const yt = await Innertube.create();
+  const yt = await getInnertube();
   const info = await yt.getInfo(videoId);
   if (!info) {
     throw youtubeFailure('NO_TRANSCRIPT', 'video not found');
@@ -70,7 +83,7 @@ async function realFetchTranscript(videoId: string): Promise<FetchedTranscript> 
     throw youtubeFailure('NO_TRANSCRIPT', 'no transcript available for this video');
   }
 
-  const res = await fetch(`${track.base_url}&fmt=json3`);
+  const res = await fetch(`${track.base_url}&fmt=json3`, { signal: AbortSignal.timeout(30_000) });
   if (!res.ok) {
     throw youtubeFailure('NO_TRANSCRIPT', `transcript request failed (${res.status})`);
   }
@@ -116,7 +129,8 @@ async function timedFetchTranscript(videoId: string, fetchTranscript: Transcript
 
 const statusForCode: Record<string, number> = {
   NO_TRANSCRIPT: 502,
-  TIMEOUT: 504
+  TIMEOUT: 504,
+  LIMIT_REACHED: 409
 };
 
 export async function youtubeSourceCreate(

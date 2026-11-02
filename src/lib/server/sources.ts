@@ -9,6 +9,7 @@ const MAX_SOURCE_TEXT = 2_000_000;
 function statusForCode(code: string): number {
   if (code === 'INVALID_TEXT') return 400;
   if (code === 'FORBIDDEN_NOTEBOOK') return 404;
+  if (code === 'LIMIT_REACHED') return 409;
   return 500;
 }
 

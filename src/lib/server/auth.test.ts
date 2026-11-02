@@ -1,3 +1,4 @@
+import { randomBytes, scryptSync } from 'node:crypto';
 // @vitest-environment node
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Client } from '@libsql/client';
@@ -190,6 +191,47 @@ describe('login route', () => {
   it('rejects a disabled account with 403', async () => {
     const res = await login(db, loginRequest('login.disabled@test.local', PASSWORD));
     expect(res.status).toBe(403);
+  });
+
+  it('throttles repeated failed logins per account and recovers on success elsewhere', async () => {
+    const ip = '198.51.100.77';
+    const attempt = (password: string) =>
+      login(db, new Request('http://x/api/auth/login', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ email: 'login.user@test.local', password })
+      }));
+
+    for (let i = 0; i < 5; i++) {
+      expect((await attempt('wrong-password')).status).toBe(401);
+    }
+    const blocked = await attempt(PASSWORD);
+    expect(blocked.status).toBe(429);
+    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+
+    // A different client IP is not affected by this IP's lockout.
+    const other = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.78' },
+      body: JSON.stringify({ email: 'login.user@test.local', password: PASSWORD })
+    }));
+    expect(other.status).toBe(200);
+  });
+
+  it('upgrades a legacy scrypt hash on successful login', async () => {
+    const salt = randomBytes(16);
+    const legacy = `scrypt$${salt.toString('base64url')}$${scryptSync('legacy-password-1', salt, 32).toString('base64url')}`;
+    await createUser(db, { email: 'legacy@test.local', passwordHash: legacy, role: 'user' });
+
+    const res = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.90' },
+      body: JSON.stringify({ email: 'legacy@test.local', password: 'legacy-password-1' })
+    }));
+    expect(res.status).toBe(200);
+
+    const row = await db.execute({ sql: 'SELECT pw_hash FROM users WHERE email = ?', args: ['legacy@test.local'] });
+    expect(String(row.rows[0]!['pw_hash'])).toMatch(/^scrypt2\$/);
   });
 
   it('rejects a malformed body with 400', async () => {
@@ -412,10 +454,19 @@ describe('signup route', () => {
     expect(res.status).toBe(400);
   });
 
-  it('accepts a six-character password', async () => {
+  it('rejects a nine-character password with 400', async () => {
     const res = await signup(
       db,
-      signupRequest('six@test.local', 'sixsix', INVITE),
+      signupRequest('nine@test.local', 'ninechars', INVITE),
+      INVITE
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('accepts a password at the minimum length', async () => {
+    const res = await signup(
+      db,
+      signupRequest('ten@test.local', 'ten-chars-1', INVITE),
       INVITE
     );
     expect(res.status).toBe(201);

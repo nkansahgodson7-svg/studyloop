@@ -35,18 +35,39 @@ export interface RateLimitResult {
   retryAfterSeconds: number;
 }
 
-export function rateLimit(key: string, now = Date.now()): RateLimitResult {
+export function rateLimit(
+  key: string,
+  now = Date.now(),
+  maxAttempts = MAX_ATTEMPTS
+): RateLimitResult {
   sweep(now);
   const bucket = buckets.get(key);
   if (!bucket || bucket.resetAt <= now) {
     buckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
     return { allowed: true, retryAfterSeconds: 0 };
   }
-  if (bucket.count >= MAX_ATTEMPTS) {
+  if (bucket.count >= maxAttempts) {
     return { allowed: false, retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000) };
   }
   bucket.count += 1;
   return { allowed: true, retryAfterSeconds: 0 };
+}
+
+/** Read-only check: does not count as an attempt. */
+export function rateLimitStatus(
+  key: string,
+  now = Date.now(),
+  maxAttempts = MAX_ATTEMPTS
+): RateLimitResult {
+  const bucket = buckets.get(key);
+  if (!bucket || bucket.resetAt <= now || bucket.count < maxAttempts) {
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  return { allowed: false, retryAfterSeconds: Math.ceil((bucket.resetAt - now) / 1000) };
+}
+
+export function clearRateLimit(key: string): void {
+  buckets.delete(key);
 }
 
 export function resetRateLimits(): void {

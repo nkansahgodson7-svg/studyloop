@@ -167,6 +167,11 @@ CREATE INDEX IF NOT EXISTS idx_chat_notebook ON chat_messages(notebook_id, id);
 CREATE INDEX IF NOT EXISTS idx_cards_notebook ON cards(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_quiz_notebook ON quiz_items(notebook_id);
+CREATE INDEX IF NOT EXISTS idx_notebooks_user ON notebooks(user_id);
+CREATE INDEX IF NOT EXISTS idx_chunks_source ON source_chunks(source_id, ord);
+CREATE INDEX IF NOT EXISTS idx_reviews_due ON reviews(due);
+CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON quiz_attempts(user_id);
+CREATE INDEX IF NOT EXISTS idx_cards_source ON cards(source_id);
 
 CREATE TABLE IF NOT EXISTS review_log (
   id INTEGER PRIMARY KEY,
@@ -174,6 +179,8 @@ CREATE TABLE IF NOT EXISTS review_log (
   rating INTEGER NOT NULL,
   graded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_review_log_card ON review_log(card_id, graded_at);
 `;
 
 export async function applySchema(db: Client): Promise<void> {

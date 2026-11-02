@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useToast } from "@/components/ui/Toast";
 import { clearSessionCaches } from "@/lib/client/cache";
-import { MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 function nameFromEmail(email: string): string {
   const prefix = email.split("@")[0] || "learner";
@@ -32,8 +31,8 @@ export default function LoginPage() {
       setError("Enter a valid email address.");
       return;
     }
-    if (nextPassword.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least  characters.`);
+    if (nextPassword.length === 0) {
+      setError("Enter your password.");
       return;
     }
     setSubmitting(true);
@@ -114,7 +113,6 @@ export default function LoginPage() {
               autoComplete="current-password"
               placeholder="Your password"
               required
-              minLength={MIN_PASSWORD_LENGTH}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />

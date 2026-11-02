@@ -22,6 +22,8 @@ function rowToNotebook(row: Record<string, InValue>): NotebookRow {
   };
 }
 
+export const MAX_NOTEBOOKS_PER_USER = 100;
+
 export async function createNotebook(db: Client, userId: number, title: string): Promise<NotebookRow> {
   const result = await db.execute({
     sql: 'INSERT INTO notebooks (user_id, title) VALUES (?, ?)',
@@ -56,16 +58,15 @@ export async function listNotebookViews(
   now: Date
 ): Promise<NotebookViewRow[]> {
   const result = await db.execute({
+    // Independent subqueries: joining sources x cards x reviews in one query
+    // multiplies rows (sources * cards) before DISTINCT collapses them.
     sql: `SELECT nb.id, nb.user_id, nb.title, nb.created_at,
-                 COUNT(DISTINCT s.id) AS sources,
-                 COUNT(DISTINCT c.id) AS cards,
-                 COUNT(DISTINCT CASE WHEN r.due <= ? THEN c.id END) AS due
+                 (SELECT COUNT(*) FROM sources s WHERE s.notebook_id = nb.id) AS sources,
+                 (SELECT COUNT(*) FROM cards c WHERE c.notebook_id = nb.id) AS cards,
+                 (SELECT COUNT(*) FROM cards c JOIN reviews r ON r.card_id = c.id
+                   WHERE c.notebook_id = nb.id AND r.due <= ?) AS due
           FROM notebooks nb
-          LEFT JOIN sources s ON s.notebook_id = nb.id
-          LEFT JOIN cards c ON c.notebook_id = nb.id
-          LEFT JOIN reviews r ON r.card_id = c.id
           WHERE nb.user_id = ?
-          GROUP BY nb.id
           ORDER BY nb.created_at DESC, nb.id DESC`,
     args: [now.toISOString(), userId]
   });
@@ -128,6 +129,16 @@ export async function notebooksCreate(db: Client, req: Request): Promise<NextRes
       return NextResponse.json(
         { error: `title must be 1-${MAX_TITLE_LENGTH} characters` },
         { status: 400 }
+      );
+    }
+    const owned = await db.execute({
+      sql: 'SELECT COUNT(*) AS n FROM notebooks WHERE user_id = ?',
+      args: [user.id]
+    });
+    if (Number(owned.rows[0]?.['n'] ?? 0) >= MAX_NOTEBOOKS_PER_USER) {
+      return NextResponse.json(
+        { error: `you can have at most ${MAX_NOTEBOOKS_PER_USER} notebooks` },
+        { status: 409 }
       );
     }
     const notebook = await createNotebook(db, user.id, title);

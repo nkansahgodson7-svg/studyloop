@@ -1,8 +1,8 @@
 import type { Client } from '@libsql/client';
 import { type } from 'arktype';
 import { NextResponse } from 'next/server';
-import { hashPassword, verifyPassword, verifySecret } from './crypto';
-import { clientIp, rateLimit } from './ratelimit';
+import { hashPassword, needsRehash, verifyPassword, verifySecret } from './crypto';
+import { clearRateLimit, clientIp, rateLimit, rateLimitStatus } from './ratelimit';
 import { MIN_PASSWORD_LENGTH } from '../password';
 import {
   createSession,
@@ -134,6 +134,22 @@ async function issueSession(db: Client, user: UserRow, status = 200): Promise<Ne
   return res;
 }
 
+const LOGIN_MAX_PER_ACCOUNT = 5;
+const LOGIN_MAX_PER_IP = 30;
+
+function tooManyAttempts(retryAfterSeconds: number): NextResponse {
+  const res = NextResponse.json(
+    { error: 'too many attempts — try again later' },
+    { status: 429 }
+  );
+  res.headers.set('retry-after', String(retryAfterSeconds));
+  return res;
+}
+
+// Verified against when the email is unknown, so response time does not reveal
+// which addresses are registered.
+let dummyHash: Promise<string> | null = null;
+
 export async function login(db: Client, req: Request): Promise<NextResponse> {
   let parsedBody: unknown;
   try {
@@ -148,10 +164,40 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
   }
 
   const { email, password } = credentials;
+  const ip = clientIp(req);
+  const accountKey = `login:${ip}:${email.toLowerCase()}`;
+  const ipKey = `login-ip:${ip}`;
+  const accountGate = rateLimitStatus(accountKey, Date.now(), LOGIN_MAX_PER_ACCOUNT);
+  if (!accountGate.allowed) {
+    return tooManyAttempts(accountGate.retryAfterSeconds);
+  }
+  const ipGate = rateLimitStatus(ipKey, Date.now(), LOGIN_MAX_PER_IP);
+  if (!ipGate.allowed) {
+    return tooManyAttempts(ipGate.retryAfterSeconds);
+  }
+
   const user = await findUserByEmail(db, email);
-  const valid = user ? await verifyPassword(password, user.passwordHash) : false;
+  let valid: boolean;
+  if (user) {
+    valid = await verifyPassword(password, user.passwordHash);
+  } else {
+    dummyHash ??= hashPassword('studyloop-dummy-password');
+    await verifyPassword(password, await dummyHash);
+    valid = false;
+  }
   if (!user || !valid) {
+    // Only failures count toward the limits; a correct login resets them.
+    rateLimit(accountKey, Date.now(), LOGIN_MAX_PER_ACCOUNT);
+    rateLimit(ipKey, Date.now(), LOGIN_MAX_PER_IP);
     return NextResponse.json({ error: 'invalid email or password' }, { status: 401 });
+  }
+  clearRateLimit(accountKey);
+  if (needsRehash(user.passwordHash)) {
+    // Transparently upgrade old hashes now that we hold the plaintext.
+    await db.execute({
+      sql: 'UPDATE users SET pw_hash = ? WHERE id = ?',
+      args: [await hashPassword(password), user.id]
+    });
   }
   if (user.disabled) {
     return NextResponse.json({ error: 'account disabled' }, { status: 403 });
