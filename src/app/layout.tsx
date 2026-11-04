@@ -2,6 +2,9 @@ import type { Metadata, Viewport } from 'next';
 
 import { AppShell } from "@/components/AppShell";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
+// Self-hosted variable fonts (same-origin, no render-blocking third-party @import).
+import "@fontsource-variable/inter";
+import "@fontsource-variable/fraunces/opsz.css";
 import "./globals.css";
 
 export const metadata: Metadata = {

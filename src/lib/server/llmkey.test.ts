@@ -44,7 +44,7 @@ describe('llmkey data layer', () => {
 
     const raw = await db.execute({ sql: 'SELECT llm_key_encrypted FROM users WHERE id = ?', args: [userId] });
     const blob = String(raw.rows[0]!.llm_key_encrypted);
-    expect(blob).toMatch(/^v1\$/);
+    expect(blob).toMatch(/^v2\$/);
     expect(blob).not.toContain(GROQ_TEST_KEY);
 
     const plain = await loadUserPlainKey(db, userId);
