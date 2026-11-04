@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next';
+import { Analytics } from '@vercel/analytics/next';
 
 import { AppShell } from "@/components/AppShell";
 import { ServiceWorkerRegister } from "@/components/ServiceWorkerRegister";
@@ -46,6 +47,7 @@ export default function RootLayout({
         <div className="frame" aria-hidden="true" />
         <AppShell>{children}</AppShell>
         <ServiceWorkerRegister />
+        <Analytics />
       </body>
     </html>
   );
