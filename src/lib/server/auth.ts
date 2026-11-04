@@ -134,7 +134,10 @@ async function issueSession(db: Client, user: UserRow, status = 200): Promise<Ne
   return res;
 }
 
-const LOGIN_MAX_PER_ACCOUNT = 5;
+// The account key deliberately ignores the IP: X-Forwarded-For can be forged,
+// and an attacker rotating it must not get a fresh budget per guess. The
+// trade-off is that someone can lock a known email out for one window.
+const LOGIN_MAX_PER_ACCOUNT = 10;
 const LOGIN_MAX_PER_IP = 30;
 
 function tooManyAttempts(retryAfterSeconds: number): NextResponse {
@@ -165,13 +168,13 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
 
   const { email, password } = credentials;
   const ip = clientIp(req);
-  const accountKey = `login:${ip}:${email.toLowerCase()}`;
-  const ipKey = `login-ip:${ip}`;
-  const accountGate = rateLimitStatus(accountKey, Date.now(), LOGIN_MAX_PER_ACCOUNT);
+  const accountKey = `login:acct:${email.toLowerCase()}`;
+  const ipKey = `login:ip:${ip}`;
+  const accountGate = await rateLimitStatus(db, accountKey, { max: LOGIN_MAX_PER_ACCOUNT });
   if (!accountGate.allowed) {
     return tooManyAttempts(accountGate.retryAfterSeconds);
   }
-  const ipGate = rateLimitStatus(ipKey, Date.now(), LOGIN_MAX_PER_IP);
+  const ipGate = await rateLimitStatus(db, ipKey, { max: LOGIN_MAX_PER_IP });
   if (!ipGate.allowed) {
     return tooManyAttempts(ipGate.retryAfterSeconds);
   }
@@ -187,11 +190,11 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
   }
   if (!user || !valid) {
     // Only failures count toward the limits; a correct login resets them.
-    rateLimit(accountKey, Date.now(), LOGIN_MAX_PER_ACCOUNT);
-    rateLimit(ipKey, Date.now(), LOGIN_MAX_PER_IP);
+    await rateLimit(db, accountKey, { max: LOGIN_MAX_PER_ACCOUNT });
+    await rateLimit(db, ipKey, { max: LOGIN_MAX_PER_IP });
     return NextResponse.json({ error: 'invalid email or password' }, { status: 401 });
   }
-  clearRateLimit(accountKey);
+  await clearRateLimit(db, accountKey);
   if (needsRehash(user.passwordHash)) {
     // Transparently upgrade old hashes now that we hold the plaintext.
     await db.execute({
@@ -220,7 +223,7 @@ export async function signup(
   req: Request,
   inviteCode = process.env.SIGNUP_INVITE_CODE
 ): Promise<NextResponse> {
-  const gate = rateLimit(`signup:${clientIp(req)}`);
+  const gate = await rateLimit(db, `signup:${clientIp(req)}`);
   if (!gate.allowed) {
     const res = NextResponse.json(
       { error: 'too many attempts — try again later' },
@@ -279,7 +282,7 @@ export async function changePassword(db: Client, req: Request): Promise<NextResp
   let user: SessionUser;
   try {
     user = await requireUser(db, req);
-    const gate = rateLimit(`change-password:${user.id}`);
+    const gate = await rateLimit(db, `change-password:${user.id}`);
     if (!gate.allowed) {
       const res = NextResponse.json(
         { error: 'too many attempts — try again later' },

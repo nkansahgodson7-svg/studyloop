@@ -173,6 +173,13 @@ CREATE INDEX IF NOT EXISTS idx_reviews_due ON reviews(due);
 CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON quiz_attempts(user_id);
 CREATE INDEX IF NOT EXISTS idx_cards_source ON cards(source_id);
 
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  count INTEGER NOT NULL,
+  reset_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_reset ON rate_limits(reset_at);
+
 CREATE TABLE IF NOT EXISTS review_log (
   id INTEGER PRIMARY KEY,
   card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,

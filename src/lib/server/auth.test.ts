@@ -18,7 +18,7 @@ import {
   me,
   signup
 } from './auth';
-import { resetRateLimits } from './ratelimit';
+import { rateLimit, resetRateLimits } from './ratelimit';
 import { seedAdmin } from './seed-admin';
 
 const PASSWORD = 'correct horse battery staple';
@@ -193,29 +193,53 @@ describe('login route', () => {
     expect(res.status).toBe(403);
   });
 
-  it('throttles repeated failed logins per account and recovers on success elsewhere', async () => {
-    const ip = '198.51.100.77';
-    const attempt = (password: string) =>
+  it('locks an account after repeated failures, even when the client IP is rotated', async () => {
+    await createUser(db, {
+      email: 'throttle@test.local',
+      passwordHash: await hashPassword(PASSWORD),
+      role: 'user'
+    });
+    const attempt = (password: string, ip: string) =>
       login(db, new Request('http://x/api/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
-        body: JSON.stringify({ email: 'login.user@test.local', password })
+        body: JSON.stringify({ email: 'throttle@test.local', password })
       }));
 
-    for (let i = 0; i < 5; i++) {
-      expect((await attempt('wrong-password')).status).toBe(401);
+    // A new (forged) IP per guess must not reset the per-account budget.
+    for (let i = 0; i < 10; i++) {
+      expect((await attempt('wrong-password', `198.51.100.${i + 1}`)).status).toBe(401);
     }
-    const blocked = await attempt(PASSWORD);
+    const blocked = await attempt(PASSWORD, '198.51.100.200');
     expect(blocked.status).toBe(429);
     expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+  });
 
-    // A different client IP is not affected by this IP's lockout.
-    const other = await login(db, new Request('http://x/api/auth/login', {
+  it('does not let one locked account affect another account', async () => {
+    const res = await login(db, new Request('http://x/api/auth/login', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.78' },
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.77' },
       body: JSON.stringify({ email: 'login.user@test.local', password: PASSWORD })
     }));
-    expect(other.status).toBe(200);
+    expect(res.status).toBe(200);
+  });
+
+  it('shares failure counts across handler calls via the database (not process memory)', async () => {
+    await createUser(db, {
+      email: 'shared@test.local',
+      passwordHash: await hashPassword(PASSWORD),
+      role: 'user'
+    });
+    for (let i = 0; i < 10; i++) {
+      await rateLimit(db, 'login:acct:shared@test.local', { max: 10 });
+    }
+    // A brand-new handler call sees the lockout written by "another instance".
+    const res = await login(db, new Request('http://x/api/auth/login', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '198.51.100.99' },
+      body: JSON.stringify({ email: 'shared@test.local', password: PASSWORD })
+    }));
+    expect(res.status).toBe(429);
   });
 
   it('upgrades a legacy scrypt hash on successful login', async () => {
@@ -254,8 +278,8 @@ describe('change password route', () => {
     await applySchema(db);
   });
 
-  beforeEach(() => {
-    resetRateLimits();
+  beforeEach(async () => {
+    await resetRateLimits(db);
   });
 
   afterAll(async () => {
@@ -364,8 +388,8 @@ describe('signup route', () => {
     await applySchema(db);
   });
 
-  beforeEach(() => {
-    resetRateLimits();
+  beforeEach(async () => {
+    await resetRateLimits(db);
   });
 
   afterAll(async () => {

@@ -4,12 +4,12 @@ const isDev = process.env.NODE_ENV !== 'production';
 
 // Next's App Router emits inline bootstrap scripts, so script-src needs
 // 'unsafe-inline' unless nonces are wired through middleware. Everything else
-// is locked to same-origin. Google Fonts is allowed because globals.css imports it.
+// is locked to same-origin (fonts are self-hosted via @fontsource-variable).
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
-  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-  "font-src 'self' data: https://fonts.gstatic.com",
+  "style-src 'self' 'unsafe-inline'",
+  "font-src 'self'",
   "img-src 'self' data: blob:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
