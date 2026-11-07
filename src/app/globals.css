@@ -2388,21 +2388,46 @@ picture {
   }
 
   .shell {
-    width: 100%;
+    width: min(1440px, calc(100vw - 48px));
     max-width: none;
-    margin: 0;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    background: transparent;
-    height: auto;
+    margin: 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    box-shadow: var(--shadow-float);
+    background: var(--paper);
+    height: calc(100dvh - 48px);
+  }
+
+  .screen {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  :where(.screen:not(.screen--admin) > *) {
+    max-width: 720px;
+    margin-inline: auto;
+    width: 100%;
+  }
+
+  .auth {
+    max-width: 440px;
+    margin-inline: auto;
+    width: 100%;
   }
 
   .tabbar {
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    max-width: 500px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
   }
 
   .sheet-panel {
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    max-width: 540px;
     border-radius: 28px 28px 0 0;
   }
 }
