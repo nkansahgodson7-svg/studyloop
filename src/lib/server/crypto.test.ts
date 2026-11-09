@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { decryptSecret, encryptSecret, hashPassword, sessionToken, verifyPassword, verifySecret } from './crypto';
+import { scrypt as scryptCb } from 'node:crypto';
+import { promisify } from 'node:util';
+import {
+  decryptSecret,
+  encryptSecret,
+  hashPassword,
+  needsRehash,
+  sessionToken,
+  verifyPassword,
+  verifySecret
+} from './crypto';
+
+const scrypt = promisify(scryptCb) as (
+  password: string,
+  salt: Buffer,
+  keylen: number,
+  options?: { N: number; r: number; p: number; maxmem: number }
+) => Promise<Buffer>;
 
 describe('password hashing', () => {
   it('hashes and verifies a password, refusing wrong ones', async () => {
@@ -11,6 +28,46 @@ describe('password hashing', () => {
     expect(otherHash).not.toBe(hash);
 
     expect(await verifyPassword('wrong horse', hash)).toBe(false);
+  });
+
+  it('writes scrypt2 hashes with explicit cost params, and does not want them rehashed', async () => {
+    const hash = await hashPassword('correct horse');
+    expect(hash).toMatch(/^scrypt2\$\d+\$\d+\$\d+\$/);
+    expect(needsRehash(hash)).toBe(false);
+  });
+
+  // Regression: hashes written by the scrypt2 format were rejected outright by
+  // verifyPassword, locking every account created after the cost bump out.
+  it('verifies a scrypt2 hash produced by another process', async () => {
+    const stored = 'scrypt2$32768$8$1$' + Buffer.from('salt-bytes-here!').toString('base64url') + '$';
+    const salt = Buffer.from('salt-bytes-here!');
+    const key = (await scrypt('pw-from-scrypt2', salt, 32, {
+      N: 32768,
+      r: 8,
+      p: 1,
+      maxmem: 128 * 1024 * 1024
+    })) as Buffer;
+    const full = stored + key.toString('base64url');
+
+    expect(await verifyPassword('pw-from-scrypt2', full)).toBe(true);
+    expect(await verifyPassword('wrong', full)).toBe(false);
+    expect(needsRehash(full)).toBe(false);
+  });
+
+  it('still verifies legacy scrypt hashes and flags them for rehash', async () => {
+    const salt = Buffer.from('legacy-salt-16b!');
+    const key = (await scrypt('legacy-pw', salt, 32)) as Buffer;
+    const legacy = `scrypt$${salt.toString('base64url')}$${key.toString('base64url')}`;
+
+    expect(await verifyPassword('legacy-pw', legacy)).toBe(true);
+    expect(needsRehash(legacy)).toBe(true);
+  });
+
+  it('refuses malformed hashes instead of throwing', async () => {
+    for (const bad of ['', 'nonsense', 'scrypt$$', 'scrypt2$1$2$3$', 'bcrypt$a$b']) {
+      expect(await verifyPassword('anything', bad)).toBe(false);
+      expect(needsRehash(bad)).toBe(true);
+    }
   });
 });
 
