@@ -1,7 +1,7 @@
 import type { Client } from '@libsql/client';
 import { type } from 'arktype';
 import { NextResponse } from 'next/server';
-import { hashPassword, verifyPassword, verifySecret } from './crypto';
+import { hashPassword, needsRehash, verifyPassword, verifySecret } from './crypto';
 import { clientIp, rateLimit } from './ratelimit';
 import { MIN_PASSWORD_LENGTH } from '../password';
 import {
@@ -152,6 +152,14 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
   const valid = user ? await verifyPassword(password, user.passwordHash) : false;
   if (!user || !valid) {
     return NextResponse.json({ error: 'invalid email or password' }, { status: 401 });
+  }
+  if (needsRehash(user.passwordHash)) {
+    // Transparently upgrade legacy hashes now that we hold the plaintext.
+    // Touches pw_hash only: must_change_password and expiry must survive login.
+    await db.execute({
+      sql: 'UPDATE users SET pw_hash = ? WHERE id = ?',
+      args: [await hashPassword(password), user.id]
+    });
   }
   if (user.disabled) {
     return NextResponse.json({ error: 'account disabled' }, { status: 403 });

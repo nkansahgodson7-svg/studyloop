@@ -9,25 +9,78 @@ import {
 } from 'node:crypto';
 import { promisify } from 'node:util';
 
-const scrypt = promisify(scryptCb);
+const scrypt = promisify(scryptCb) as (
+  password: string,
+  salt: Buffer,
+  keylen: number,
+  options: { N: number; r: number; p: number; maxmem: number }
+) => Promise<Buffer>;
 const KEY_LEN = 32;
 const SALT_LEN = 16;
 
+// Current password-hash cost. Stored per hash, so it can be raised later
+// without invalidating existing users.
+const SCRYPT_N = 2 ** 15;
+const SCRYPT_R = 8;
+const SCRYPT_P = 1;
+// Node's default maxmem (32 MiB) is too small for N=2^15, r=8.
+const SCRYPT_MAXMEM = 128 * 1024 * 1024;
+// Pre-v2 hashes used Node's defaults (N=16384, r=8, p=1).
+const LEGACY_PARAMS = { N: 16384, r: 8, p: 1 };
+
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(SALT_LEN);
-  const key = (await scrypt(password, salt, KEY_LEN)) as Buffer;
-  return `scrypt$${salt.toString('base64url')}$${key.toString('base64url')}`;
+  const key = await scrypt(password, salt, KEY_LEN, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+    maxmem: SCRYPT_MAXMEM
+  });
+  return `scrypt2$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt.toString('base64url')}$${key.toString('base64url')}`;
+}
+
+function parseHash(
+  stored: string
+): { N: number; r: number; p: number; salt: Buffer; key: Buffer } | null {
+  const parts = stored.split('$');
+  if (parts[0] === 'scrypt' && parts.length === 3 && parts[1] && parts[2]) {
+    return {
+      ...LEGACY_PARAMS,
+      salt: Buffer.from(parts[1], 'base64url'),
+      key: Buffer.from(parts[2], 'base64url')
+    };
+  }
+  if (parts[0] === 'scrypt2' && parts.length === 6) {
+    const [, n, r, p, saltB64, keyB64] = parts;
+    const N = Number(n);
+    const R = Number(r);
+    const P = Number(p);
+    if (!Number.isInteger(N) || !Number.isInteger(R) || !Number.isInteger(P) || !saltB64 || !keyB64) {
+      return null;
+    }
+    return { N, r: R, p: P, salt: Buffer.from(saltB64, 'base64url'), key: Buffer.from(keyB64, 'base64url') };
+  }
+  return null;
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [scheme, saltB64, keyB64] = stored.split('$');
-  if (scheme !== 'scrypt' || !saltB64 || !keyB64) {
+  const parsed = parseHash(stored);
+  if (!parsed || parsed.key.length === 0) {
     return false;
   }
-  const salt = Buffer.from(saltB64, 'base64url');
-  const expected = Buffer.from(keyB64, 'base64url');
-  const key = (await scrypt(password, salt, expected.length)) as Buffer;
-  return timingSafeEqual(key, expected);
+  const key = await scrypt(password, parsed.salt, parsed.key.length, {
+    N: parsed.N,
+    r: parsed.r,
+    p: parsed.p,
+    maxmem: SCRYPT_MAXMEM
+  });
+  return timingSafeEqual(key, parsed.key);
+}
+
+/** True for legacy hashes or hashes made with weaker parameters than today's. */
+export function needsRehash(stored: string): boolean {
+  const parsed = parseHash(stored);
+  return !parsed || parsed.N < SCRYPT_N || parsed.r < SCRYPT_R || parsed.p < SCRYPT_P;
 }
 
 function derivedKey(secret: string): Buffer {
