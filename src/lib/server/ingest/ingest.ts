@@ -28,6 +28,8 @@ export interface IngestResult {
 
 export type IngestableKind = 'text' | 'pdf' | 'youtube';
 
+export const MAX_SOURCES_PER_NOTEBOOK = 100;
+
 export const SOURCE_KINDS: readonly IngestableKind[] = ['text', 'pdf', 'youtube'];
 
 const SOURCE_COLUMNS = 'id, notebook_id, kind, title, url, meta, created_at';
@@ -66,32 +68,32 @@ export async function ingestTextSource(
       throw conflict('FORBIDDEN_NOTEBOOK', 'notebook not found for this user');
     }
   }
+  const count = await db.execute({
+    sql: 'SELECT COUNT(*) AS n FROM sources WHERE notebook_id = ?',
+    args: [input.notebookId]
+  });
+  if (Number(count.rows[0]?.['n'] ?? 0) >= MAX_SOURCES_PER_NOTEBOOK) {
+    throw conflict('LIMIT_REACHED', `a notebook can hold at most ${MAX_SOURCES_PER_NOTEBOOK} sources`);
+  }
   const title = (input.title ?? '').trim() || 'Untitled source';
 
+  const chunks = chunkText(text);
   const inserted = await db.execute({
-    sql: 'INSERT INTO sources (notebook_id, kind, title, url, text) VALUES (?, ?, ?, ?, ?)',
-    args: [input.notebookId, kind, title, input.url ?? null, text]
+    sql: 'INSERT INTO sources (notebook_id, kind, title, url, text, meta) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [input.notebookId, kind, title, input.url ?? null, text, input.meta || `${chunks.length} chunks`]
   });
   const sourceId = Number(inserted.lastInsertRowid!);
 
-  const chunks = chunkText(text);
-  for (let ord = 0; ord < chunks.length; ord++) {
-    await db.execute({
-      sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, ?, ?)',
-      args: [sourceId, ord, chunks[ord]!]
-    });
-  }
-
-  if (input.meta) {
-    await db.execute({
-      sql: 'UPDATE sources SET meta = ? WHERE id = ?',
-      args: [input.meta, sourceId]
-    });
-  } else {
-    await db.execute({
-      sql: 'UPDATE sources SET meta = ? WHERE id = ?',
-      args: [`${chunks.length} chunks`, sourceId]
-    });
+  // One round trip instead of one per chunk (matters on remote Turso).
+  const BATCH = 200;
+  for (let i = 0; i < chunks.length; i += BATCH) {
+    await db.batch(
+      chunks.slice(i, i + BATCH).map((chunk, j) => ({
+        sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, ?, ?)',
+        args: [sourceId, i + j, chunk] as InValue[]
+      })),
+      'write'
+    );
   }
 
   return { id: sourceId, title, chunks: chunks.length };

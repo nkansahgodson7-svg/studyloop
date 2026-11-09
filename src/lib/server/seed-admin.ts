@@ -41,18 +41,25 @@ export async function seedAdmin(
 }
 
 export const DEMO_EMAIL = 'demo@studyloop.app';
-export const DEMO_PASSWORD = 'studyloop';
 
+/** The demo account is only created when a password is supplied explicitly. */
 export async function ensureDemoUser(
-  db: Client
+  db: Client,
+  password: string
 ): Promise<{ id: number; email: string }> {
+  if (password.length < MIN_PASSWORD_LENGTH) {
+    throw Object.assign(
+      new Error(`DEMO_PASSWORD must be at least ${MIN_PASSWORD_LENGTH} characters`),
+      { code: 'WEAK_PASSWORD' }
+    );
+  }
   const existing = await findUserByEmail(db, DEMO_EMAIL);
   if (existing) {
     return { id: existing.id, email: existing.email };
   }
   const created = await createUser(db, {
     email: DEMO_EMAIL,
-    passwordHash: await hashPassword(DEMO_PASSWORD),
+    passwordHash: await hashPassword(password),
     role: 'user'
   });
   return { id: created.id, email: created.email };
@@ -76,10 +83,13 @@ if (isMainModule()) {
       const db = getDb();
       await applySchema(db);
       const admin = await seedAdmin(db, { email, password });
-      await ensureDemoUser(db);
+      const demoPassword = process.env.DEMO_PASSWORD;
+      if (demoPassword) {
+        await ensureDemoUser(db, demoPassword);
+      }
       await db.close();
       console.log(`admin ready: ${admin.email}`);
-      console.log("demo user ready: demo@studyloop.app");
+      console.log(demoPassword ? `demo user ready: ${DEMO_EMAIL}` : 'demo user skipped (set DEMO_PASSWORD to create it)');
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
       process.exitCode = 1;

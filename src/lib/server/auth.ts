@@ -2,7 +2,7 @@ import type { Client } from '@libsql/client';
 import { type } from 'arktype';
 import { NextResponse } from 'next/server';
 import { hashPassword, needsRehash, verifyPassword, verifySecret } from './crypto';
-import { clientIp, rateLimit } from './ratelimit';
+import { clearRateLimit, clientIp, rateLimit, rateLimitStatus } from './ratelimit';
 import { MIN_PASSWORD_LENGTH } from '../password';
 import {
   createSession,
@@ -134,6 +134,25 @@ async function issueSession(db: Client, user: UserRow, status = 200): Promise<Ne
   return res;
 }
 
+// The account key deliberately ignores the IP: X-Forwarded-For can be forged,
+// and an attacker rotating it must not get a fresh budget per guess. The
+// trade-off is that someone can lock a known email out for one window.
+const LOGIN_MAX_PER_ACCOUNT = 10;
+const LOGIN_MAX_PER_IP = 30;
+
+function tooManyAttempts(retryAfterSeconds: number): NextResponse {
+  const res = NextResponse.json(
+    { error: 'too many attempts — try again later' },
+    { status: 429 }
+  );
+  res.headers.set('retry-after', String(retryAfterSeconds));
+  return res;
+}
+
+// Verified against when the email is unknown, so response time does not reveal
+// which addresses are registered.
+let dummyHash: Promise<string> | null = null;
+
 export async function login(db: Client, req: Request): Promise<NextResponse> {
   let parsedBody: unknown;
   try {
@@ -148,14 +167,36 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
   }
 
   const { email, password } = credentials;
+  const ip = clientIp(req);
+  const accountKey = `login:acct:${email.toLowerCase()}`;
+  const ipKey = `login:ip:${ip}`;
+  const accountGate = await rateLimitStatus(db, accountKey, { max: LOGIN_MAX_PER_ACCOUNT });
+  if (!accountGate.allowed) {
+    return tooManyAttempts(accountGate.retryAfterSeconds);
+  }
+  const ipGate = await rateLimitStatus(db, ipKey, { max: LOGIN_MAX_PER_IP });
+  if (!ipGate.allowed) {
+    return tooManyAttempts(ipGate.retryAfterSeconds);
+  }
+
   const user = await findUserByEmail(db, email);
-  const valid = user ? await verifyPassword(password, user.passwordHash) : false;
+  let valid: boolean;
+  if (user) {
+    valid = await verifyPassword(password, user.passwordHash);
+  } else {
+    dummyHash ??= hashPassword('studyloop-dummy-password');
+    await verifyPassword(password, await dummyHash);
+    valid = false;
+  }
   if (!user || !valid) {
+    // Only failures count toward the limits; a correct login resets them.
+    await rateLimit(db, accountKey, { max: LOGIN_MAX_PER_ACCOUNT });
+    await rateLimit(db, ipKey, { max: LOGIN_MAX_PER_IP });
     return NextResponse.json({ error: 'invalid email or password' }, { status: 401 });
   }
+  await clearRateLimit(db, accountKey);
   if (needsRehash(user.passwordHash)) {
-    // Transparently upgrade legacy hashes now that we hold the plaintext.
-    // Touches pw_hash only: must_change_password and expiry must survive login.
+    // Transparently upgrade old hashes now that we hold the plaintext.
     await db.execute({
       sql: 'UPDATE users SET pw_hash = ? WHERE id = ?',
       args: [await hashPassword(password), user.id]
@@ -182,7 +223,7 @@ export async function signup(
   req: Request,
   inviteCode = process.env.SIGNUP_INVITE_CODE
 ): Promise<NextResponse> {
-  const gate = rateLimit(`signup:${clientIp(req)}`);
+  const gate = await rateLimit(db, `signup:${clientIp(req)}`);
   if (!gate.allowed) {
     const res = NextResponse.json(
       { error: 'too many attempts — try again later' },
@@ -241,7 +282,7 @@ export async function changePassword(db: Client, req: Request): Promise<NextResp
   let user: SessionUser;
   try {
     user = await requireUser(db, req);
-    const gate = rateLimit(`change-password:${user.id}`);
+    const gate = await rateLimit(db, `change-password:${user.id}`);
     if (!gate.allowed) {
       const res = NextResponse.json(
         { error: 'too many attempts — try again later' },

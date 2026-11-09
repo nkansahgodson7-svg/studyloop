@@ -194,9 +194,9 @@ describe('admin create user', () => {
     expect(res.status).toBe(400);
   });
 
-  it('accepts a six-character password', async () => {
+  it('accepts a password at the minimum length', async () => {
     const res = await adminCreateUser(db, await adminRequest('http://x/api/admin/users', 'POST', {
-      email: 'sixchars@test.local', password: 'sixsix'
+      email: 'sixchars@test.local', password: 'ten-chars-1'
     }, adminToken));
     expect(res.status).toBe(201);
   });

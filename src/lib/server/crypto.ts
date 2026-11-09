@@ -5,6 +5,7 @@ import {
   createHmac,
   randomBytes,
   scrypt as scryptCb,
+  scryptSync,
   timingSafeEqual
 } from 'node:crypto';
 import { promisify } from 'node:util';
@@ -83,8 +84,22 @@ export function needsRehash(stored: string): boolean {
   return !parsed || parsed.N < SCRYPT_N || parsed.r < SCRYPT_R || parsed.p < SCRYPT_P;
 }
 
-function derivedKey(secret: string): Buffer {
+// v1 envelopes derived the AES key with a bare HMAC of the secret; kept for
+// decrypting existing rows only.
+function legacyDerivedKey(secret: string): Buffer {
   return createHmac('sha256', secret).digest();
+}
+
+// v2 stretches the secret with scrypt so a short ENCRYPTION_SECRET is not
+// trivially brute-forceable from a leaked database. Cached: derivation is slow.
+const v2KeyCache = new Map<string, Buffer>();
+function derivedKey(secret: string): Buffer {
+  let key = v2KeyCache.get(secret);
+  if (!key) {
+    key = scryptSync(secret, 'studyloop/llm-key/v2', 32, { N: 2 ** 15, r: 8, p: 1, maxmem: SCRYPT_MAXMEM });
+    v2KeyCache.set(secret, key);
+  }
+  return key;
 }
 
 export function encryptSecret(plain: string, secret: string): string {
@@ -92,15 +107,16 @@ export function encryptSecret(plain: string, secret: string): string {
   const cipher = createCipheriv('aes-256-gcm', derivedKey(secret), iv);
   const encrypted = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
-  return ['v1', iv.toString('base64url'), encrypted.toString('base64url'), tag.toString('base64url')].join('$');
+  return ['v2', iv.toString('base64url'), encrypted.toString('base64url'), tag.toString('base64url')].join('$');
 }
 
 export function decryptSecret(blob: string, secret: string): string {
   const [version, ivB64, ctB64, tagB64] = blob.split('$');
-  if (version !== 'v1' || !ivB64 || !ctB64 || !tagB64) {
+  if ((version !== 'v1' && version !== 'v2') || !ivB64 || !ctB64 || !tagB64) {
     throw new Error('unrecognized secret envelope');
   }
-  const decipher = createDecipheriv('aes-256-gcm', derivedKey(secret), Buffer.from(ivB64, 'base64url'));
+  const key = version === 'v2' ? derivedKey(secret) : legacyDerivedKey(secret);
+  const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64url'));
   decipher.setAuthTag(Buffer.from(tagB64, 'base64url'));
   return Buffer.concat([decipher.update(Buffer.from(ctB64, 'base64url')), decipher.final()]).toString('utf8');
 }
