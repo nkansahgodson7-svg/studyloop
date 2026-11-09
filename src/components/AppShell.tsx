@@ -72,9 +72,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <NavDirectionContext.Provider value={direction}>
-      <SheetProvider>
-        <ToastProvider>
-          <div className={`shell ${isAdmin ? "shell--admin" : ""}`}>
+      <div className={`shell ${isAdmin ? "shell--admin" : ""}`}>
+        <SheetProvider>
+          <ToastProvider>
             <main className="view">
               <div ref={viewRef}>{children}</div>
               {exit !== null ? (
@@ -95,9 +95,9 @@ export function AppShell({ children }: { children: ReactNode }) {
               ) : null}
             </main>
             <TabBar />
-          </div>
-        </ToastProvider>
-      </SheetProvider>
+          </ToastProvider>
+        </SheetProvider>
+      </div>
     </NavDirectionContext.Provider>
   );
 }

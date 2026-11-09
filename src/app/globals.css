@@ -59,6 +59,7 @@ body {
   overscroll-behavior-y: none;
   touch-action: manipulation;
   overflow-y: hidden;
+  overflow-wrap: break-word;
 }
 
 button,
@@ -112,6 +113,19 @@ svg {
   stroke-linejoin: round;
   flex: 0 0 auto;
 }
+
+img,
+video,
+canvas,
+picture {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Responsive scale
+   Width: 400 (small phone), 560 (large phone), 720 (desktop shell),
+          760 (compact admin), 1024 (tablet), 1400 (wide).
+   Height: 480 (short), 640 (compact). */
 
 :where(button, a, input, textarea, [tabindex]):focus-visible {
   outline: none;
@@ -447,7 +461,7 @@ svg {
 }
 
 .btn--sm {
-  height: 36px;
+  min-height: 44px;
   padding: 0 14px;
   font-size: 13px;
   font-weight: 550;
@@ -465,8 +479,10 @@ svg {
 
 .icon-btn {
   display: inline-grid;
+  flex: 0 0 auto;
   place-items: center;
   width: 44px;
+  min-width: 44px;
   height: 44px;
   padding: 0;
   border: 1px solid transparent;
@@ -701,6 +717,7 @@ svg {
 .input,
 .textarea {
   width: 100%;
+  min-height: 44px;
   padding: 13px 14px;
   border: 1px solid var(--line-strong);
   border-radius: 14px;
@@ -1049,7 +1066,7 @@ svg {
 }
 
 .segmented button {
-  height: 38px;
+  min-height: 44px;
   border: 0;
   border-radius: var(--r-pill);
   background: transparent;
@@ -1149,11 +1166,13 @@ svg {
 
 .msg {
   max-width: 88%;
+  min-width: 0;
   padding: 11px 14px;
   border-radius: 18px;
   font-size: 14.5px;
   line-height: 1.52;
   text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 
 .msg p + p {
@@ -1206,14 +1225,16 @@ svg {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  max-width: 100%;
+  min-width: 0;
   padding: 5px 8px;
   border-radius: var(--r-pill);
   background: var(--accent-soft);
   color: #8f3413;
   font-size: 11px;
   font-weight: 550;
-  line-height: 1;
-  max-width: 100%;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .cite b {
@@ -1263,11 +1284,15 @@ svg {
 }
 
 .suggest button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
   border: 1px solid var(--line);
   background: var(--surface);
   border-radius: var(--r-pill);
   padding: 8px 12px;
   font-size: 12.5px;
+  line-height: 1.25;
   color: var(--ink-2);
   cursor: pointer;
   text-align: left;
@@ -1298,6 +1323,7 @@ svg {
 .composer input {
   flex: 1;
   min-width: 0;
+  min-height: 44px;
   border: 0;
   background: transparent;
   padding: 10px 0;
@@ -1310,8 +1336,8 @@ svg {
 }
 
 .composer .icon-btn {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   background: var(--ink);
   color: #fbf7ec;
 }
@@ -1445,10 +1471,12 @@ svg {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  justify-content: safe center;
   padding: 18px 20px;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
   scrollbar-width: none;
 }
 
@@ -1566,6 +1594,7 @@ svg {
   font-weight: 500;
   letter-spacing: -0.012em;
   text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 
 .flash__hint {
@@ -1604,11 +1633,13 @@ svg {
   font-size: 15px;
   line-height: 1.55;
   text-wrap: pretty;
+  overflow-wrap: anywhere;
 }
 
 .flash__source {
   font-size: 11.5px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .grades {
@@ -1681,13 +1712,27 @@ svg {
 
 .summary {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  justify-content: safe center;
   gap: 18px;
   padding: 24px;
+  padding-bottom: calc(24px + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   text-align: center;
+  scrollbar-width: none;
+}
+
+.summary::-webkit-scrollbar {
+  display: none;
+}
+
+.summary > * {
+  flex-shrink: 0;
 }
 
 .summary__ring {
@@ -1738,6 +1783,7 @@ svg {
 .profile__mail {
   font-size: 12.5px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .setting-row {
@@ -1776,16 +1822,19 @@ svg {
 .setting-row__main {
   display: grid;
   gap: 1px;
+  min-width: 0;
 }
 
 .setting-row__title {
   font-size: 14px;
   font-weight: 550;
+  overflow-wrap: anywhere;
 }
 
 .setting-row__sub {
   font-size: 12px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .setting-row__trail {
@@ -1803,6 +1852,7 @@ svg {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  justify-content: safe center;
   padding: 36px 22px calc(36px + env(safe-area-inset-bottom));
 }
 
@@ -1874,6 +1924,11 @@ svg {
 }
 
 .auth__switch a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin-inline: -4px;
+  padding-inline: 4px;
   color: var(--brand);
   font-weight: 550;
   text-decoration: none;
@@ -1928,6 +1983,7 @@ svg {
   font-size: 13px;
   line-height: 1.5;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .onboard-step__sub b {
@@ -2133,12 +2189,13 @@ svg {
   left: 0;
   right: 0;
   bottom: 0;
-  max-height: 90%;
+  max-height: min(90%, 90dvh);
   display: flex;
   flex-direction: column;
   padding: 8px 20px calc(18px + env(safe-area-inset-bottom));
   border-radius: 28px 28px 0 0;
   background: var(--surface);
+  overscroll-behavior: contain;
   transform: translateY(102%);
   transition: transform 0.32s var(--ease-out);
 }
@@ -2180,11 +2237,15 @@ svg {
 }
 
 .sheet__body {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: grid;
+  align-content: start;
   gap: 12px;
   padding-bottom: 4px;
+  scrollbar-width: thin;
 }
 
 .sheet__foot {
@@ -2302,37 +2363,10 @@ svg {
 }
 
 @media (pointer: coarse) {
-  .btn--sm {
-    min-height: 44px;
-  }
-
-  .segmented button {
-    height: 44px;
-  }
-
-  .suggest button {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-  }
-
-  .auth__switch a {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding-inline: 4px;
-    margin-inline: -4px;
-  }
-
   .input,
   .textarea,
   .composer input {
     font-size: 16px;
-  }
-
-  .composer .icon-btn {
-    width: 44px;
-    height: 44px;
   }
 }
 
@@ -2353,24 +2387,70 @@ svg {
   }
 
   .shell {
-    height: min(900px, calc(100dvh - 48px));
-    border: 1px solid var(--line-strong);
-    border-radius: 40px;
-    box-shadow: 0 50px 90px -50px rgba(21, 22, 15, 0.55);
+    width: min(1440px, calc(100vw - 48px));
+    max-width: none;
+    margin: 0 auto;
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    box-shadow: var(--shadow-float);
+    background: var(--paper);
+    height: calc(100dvh - 48px);
+  }
+
+  .screen {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+
+  :where(.screen:not(.screen--admin) > *) {
+    max-width: 720px;
+    margin-inline: auto;
+    width: 100%;
+  }
+
+  .auth {
+    max-width: 440px;
+    margin-inline: auto;
+    width: 100%;
   }
 
   .tabbar {
-    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    max-width: 500px;
+    bottom: calc(14px + env(safe-area-inset-bottom));
   }
 
   .sheet-panel {
+    left: 0;
+    right: 0;
+    margin-inline: auto;
+    max-width: 540px;
     border-radius: 28px 28px 0 0;
   }
 }
 
 @media (max-height: 640px) {
+  .auth {
+    padding-block: 20px calc(20px + env(safe-area-inset-bottom));
+  }
+
+  .auth__form {
+    margin-top: 20px;
+  }
+
   .flash-wrap {
     padding: 10px 20px;
+  }
+
+  .sheet-panel {
+    max-height: min(calc(100% - 8px), calc(100dvh - 8px));
+    padding-top: 6px;
+  }
+
+  .sheet__grab {
+    margin-bottom: 8px;
   }
 
   .sheet__head {
@@ -2398,9 +2478,68 @@ svg {
   .grades {
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
+
+  .summary {
+    gap: 12px;
+    padding: 16px 20px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .summary .h1 {
+    font-size: 26px;
+  }
+
+  .summary__stat {
+    padding: 10px;
+  }
 }
 
-@media (max-width: 360px) {
+@media (max-height: 480px) {
+  .session-top {
+    padding-top: 4px;
+  }
+
+  .session-top__mid {
+    gap: 4px;
+  }
+
+  .flash-wrap {
+    padding: 8px 16px;
+  }
+
+  .flash {
+    min-height: 200px;
+    gap: 10px;
+    padding: 16px 18px;
+  }
+
+  .flash__prompt {
+    font-size: 20px;
+  }
+
+  .flash__back {
+    gap: 8px;
+  }
+
+  .grades {
+    gap: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+  }
+
+  .grade {
+    height: 48px;
+  }
+
+  .summary {
+    gap: 10px;
+    padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .summary .h1 {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 400px) {
   .px {
     padding-inline: 16px;
   }
@@ -2490,9 +2629,13 @@ svg {
 
 .admin-simple {
   display: grid;
-  place-items: center;
+  align-content: center;
+  align-content: safe center;
+  justify-items: center;
   height: 100%;
   padding: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .admin-simple__card {
@@ -2581,7 +2724,7 @@ svg {
   align-items: center;
   gap: 10px;
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   padding: 0 10px;
   border: 0;
   border-radius: 12px;
@@ -2733,6 +2876,7 @@ svg {
 
 .admin-card__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
@@ -2744,6 +2888,7 @@ svg {
 
 .admin-legend {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 12px;
   color: var(--muted);
@@ -2863,7 +3008,8 @@ svg {
 
 .admin-chart__foot {
   display: flex;
-  gap: 28px;
+  flex-wrap: wrap;
+  gap: 18px 28px;
   margin-top: 18px;
   padding-top: 14px;
   border-top: 1px solid var(--line);
@@ -2893,12 +3039,17 @@ svg {
 
 .admin-insight {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 11px;
   padding: 10px 12px;
   border: 1px solid transparent;
   border-radius: 16px;
   background: var(--surface-2);
+}
+
+.admin-insight .grow {
+  flex: 1 1 140px;
 }
 
 .admin-insight__icon {
@@ -3004,13 +3155,13 @@ svg {
 }
 
 .admin-search .input {
-  height: 40px;
+  height: 44px;
   padding: 0 12px 0 36px;
   font-size: 13.5px;
 }
 
 .admin-select {
-  height: 40px;
+  height: 44px;
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -3022,7 +3173,10 @@ svg {
 
 .admin-table-wrap {
   overflow-x: auto;
+  overflow-y: hidden;
   margin-top: 8px;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .admin-table {
@@ -3071,6 +3225,7 @@ svg {
   align-items: center;
   gap: 11px;
   width: 100%;
+  min-height: 44px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -3133,6 +3288,7 @@ svg {
   gap: 18px;
   width: min(380px, 100%);
   padding: 20px;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
   overflow-y: auto;
   background: var(--surface);
   border-left: 1px solid var(--line);
@@ -3317,7 +3473,6 @@ svg {
 @media (pointer: coarse) {
   .admin-select,
   .admin-search .input {
-    height: 44px;
     font-size: 16px;
   }
 }
@@ -3336,16 +3491,14 @@ svg {
   }
 }
 
-@media (max-width: 1100px) {
-  .admin-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
 @media (max-width: 1024px) {
   .admin {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .admin-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .admin__side {
@@ -3386,13 +3539,11 @@ svg {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 760px) {
   .admin-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-}
 
-@media (max-width: 760px) {
   .admin__brand {
     padding: 0;
   }
@@ -3451,7 +3602,24 @@ svg {
 
   .admin-table th:first-child,
   .admin-table td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
     padding-left: 2px;
+    background: var(--surface);
+    box-shadow: 1px 0 0 var(--line);
+  }
+
+  .admin-table th:first-child {
+    z-index: 2;
+  }
+
+  .admin-user.is-selected td:first-child {
+    background: var(--brand-soft);
+  }
+
+  .admin-user:hover td:first-child {
+    background: var(--surface-2);
   }
 
   .admin-user__email {
@@ -3493,7 +3661,7 @@ svg {
   }
 
   .admin-user__email {
-    max-width: 190px;
+    max-width: 140px;
   }
 }
 
@@ -3518,7 +3686,7 @@ svg {
     gap: 0;
   }
 
-  .admin__nav-item {
-    width: 40px;
+  .admin-user__email {
+    max-width: 110px;
   }
 }
