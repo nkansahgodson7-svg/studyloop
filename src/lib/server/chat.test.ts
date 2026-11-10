@@ -88,8 +88,8 @@ describe('chat()', () => {
         search: async (_db, _notebookId, query) => {
           expect(query).toBe('How do mitochondria produce ATP?');
           return [
-            { id: 11, sourceId: 1, ord: 0, text: 'Mitochondria produce ATP through oxidative phosphorylations.', rank: 0.5 },
-            { id: 12, sourceId: 1, ord: 1, text: 'The inner membrane folds are called cristae.', rank: 0.9 }
+            { id: 11, sourceId: 1, ord: 0, text: 'Mitochondria produce ATP through oxidative phosphorylations.', page: null, rank: 0.5 },
+            { id: 12, sourceId: 1, ord: 1, text: 'The inner membrane folds are called cristae.', page: null, rank: 0.9 }
           ];
         },
         resolveLlmKey: async () => 'byo-or-default',

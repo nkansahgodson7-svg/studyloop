@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import type { Client } from '@libsql/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applySchema, makeLocalDb } from '../db';
-import { clearRateLimit, clientIp, rateLimit, rateLimitStatus, resetRateLimits } from './ratelimit';
+import {
+  clearRateLimit,
+  clientIp,
+  rateLimit,
+  rateLimitResponse,
+  rateLimitStatus,
+  resetRateLimits
+} from './ratelimit';
 
 describe('rateLimit (database-backed)', () => {
   let dir: string;
@@ -68,6 +75,16 @@ describe('rateLimit (database-backed)', () => {
     );
     expect(results.filter((r) => r.allowed)).toHaveLength(5);
     expect(results.filter((r) => !r.allowed)).toHaveLength(15);
+  });
+
+  it('rateLimitResponse returns null while allowed and a 429 with retry-after when spent', async () => {
+    const now = 1_000_000;
+    expect(await rateLimitResponse(db, 'gate', { now, max: 1 })).toBeNull();
+
+    const res = await rateLimitResponse(db, 'gate', { now, max: 1 });
+    expect(res?.status).toBe(429);
+    expect(Number(res?.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect(await res?.json()).toMatchObject({ error: expect.stringContaining('too many') });
   });
 
   it('status does not consume an attempt and clear removes the bucket', async () => {

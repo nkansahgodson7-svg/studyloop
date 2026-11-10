@@ -100,6 +100,35 @@ describe('db: schema + FTS', () => {
     await db.close();
   });
 
+  it('applySchema upgrades legacy cards and chunks with batch/page columns', async () => {
+    const db = makeLocalDb(join(dir, 'legacy-cards.db'));
+    await db.execute(`CREATE TABLE source_chunks (
+      id INTEGER PRIMARY KEY,
+      source_id INTEGER NOT NULL,
+      ord INTEGER NOT NULL,
+      text TEXT NOT NULL
+    )`);
+    await db.execute(`CREATE TABLE cards (
+      id INTEGER PRIMARY KEY,
+      notebook_id INTEGER NOT NULL,
+      source_id INTEGER,
+      front TEXT NOT NULL,
+      back TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+
+    await applySchema(db);
+    await applySchema(db);
+
+    const cardColumns = await db.execute('PRAGMA table_info(cards)');
+    expect(cardColumns.rows.map((row) => row.name)).toEqual(
+      expect.arrayContaining(['generated_at', 'batch_id'])
+    );
+    const chunkColumns = await db.execute('PRAGMA table_info(source_chunks)');
+    expect(chunkColumns.rows.map((row) => row.name)).toContain('page');
+    await db.close();
+  });
+
   it('deleting a notebook cascades chunks and keeps FTS in sync', async () => {
     const { db, source } = await seedNotebookWithChunk('cascade');
     await db.execute({

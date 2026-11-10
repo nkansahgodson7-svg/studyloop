@@ -8,7 +8,7 @@ import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
 import { createSession, createUser } from './repo';
 import { createNotebook } from './notebooks';
-import { createCard } from './cards';
+import { createCard, cardsBatchAdd } from './cards';
 import { notebookBundle } from './bundle';
 
 const PASSWORD = 'correct horse battery staple';
@@ -41,6 +41,20 @@ describe('notebook bundle', () => {
       args: [notebookId, 'Alkenes', 'Alkenes are hydrocarbons with a double bond.']
     });
     await createCard(db, notebookId, { front: 'Alkene bond?', back: 'Double bond.' });
+    const batchRes = await cardsBatchAdd(
+      db,
+      new Request(`http://x/api/notebooks/${notebookId}/cards/batch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: `sl_session=${token}` },
+        body: JSON.stringify({
+          cards: [{ front: 'Batch alkene card?', back: 'A batch answer.' }],
+          sourceSummary: 'Alkenes · pp. 1–2',
+          focus: 'naming'
+        })
+      }),
+      String(notebookId)
+    );
+    expect(batchRes.status).toBe(201);
     await db.execute({
       sql: "INSERT INTO chat_messages (notebook_id, role, content, citations) VALUES (?, 'user', ?, '[]')",
       args: [notebookId, 'What is an alkene?']
@@ -51,22 +65,48 @@ describe('notebook bundle', () => {
     await db.close();
   });
 
-  it('returns sources, cards, and chat in one response', async () => {
+  it('returns sources, cards, batches, and chat in one response', async () => {
     const res = await notebookBundle(db, await reqWithCookie(`http://x/api/notebooks/${notebookId}/bundle`, token), String(notebookId));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       id: number;
       title: string;
       sources: unknown[];
-      cards: Array<{ front: string; due: string }>;
+      cards: Array<{
+        front: string;
+        due: string;
+        batchId: number | null;
+        batchCreatedAt: string | null;
+        batchSourceSummary: string | null;
+        generatedAt: string | null;
+      }>;
+      batches: Array<{ id: number; sourceSummary: string; focus: string | null; cardCount: number }>;
       messages: Array<{ content: string }>;
     };
     expect(body.id).toBe(notebookId);
     expect(body.title).toBe('Organic Chemistry');
     expect(body.sources).toHaveLength(1);
-    expect(body.cards).toHaveLength(1);
-    expect(body.cards[0]!.front).toBe('Alkene bond?');
+    expect(body.cards).toHaveLength(2);
     expect(typeof body.cards[0]!.due).toBe('string');
+
+    const manual = body.cards.find((card) => card.front === 'Alkene bond?')!;
+    expect(manual.batchId).toBeNull();
+    expect(manual.batchCreatedAt).toBeNull();
+    expect(manual.batchSourceSummary).toBeNull();
+    expect(manual.generatedAt).toBeNull();
+
+    expect(body.batches).toHaveLength(1);
+    expect(body.batches[0]).toMatchObject({
+      sourceSummary: 'Alkenes · pp. 1–2',
+      focus: 'naming',
+      cardCount: 1
+    });
+    const generated = body.cards.find((card) => card.front === 'Batch alkene card?')!;
+    expect(generated.batchId).toBe(body.batches[0]!.id);
+    expect(generated.batchSourceSummary).toBe('Alkenes · pp. 1–2');
+    expect(typeof generated.batchCreatedAt).toBe('string');
+    expect(typeof generated.generatedAt).toBe('string');
+
     expect(body.messages.map((message) => message.content)).toContain('What is an alkene?');
   });
 

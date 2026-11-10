@@ -78,7 +78,10 @@ function ReviewSession() {
   const router = useRouter();
   const search = useSearchParams();
   const notebookParam = search.get("notebook");
-  const practice = search.get("practice") === "1" || notebookParam === "all";
+  const batchParam = search.get("batch");
+  const parsedBatch = batchParam ? Number(batchParam) : null;
+  const batchId = parsedBatch != null && Number.isInteger(parsedBatch) ? parsedBatch : null;
+  const practice = search.get("practice") === "1" || notebookParam === "all" || batchId !== null;
   const [session, setSession] = useState<SessionState | null>(null);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<UserSummary | null>(null);
@@ -115,11 +118,16 @@ function ReviewSession() {
         );
         const queue: QueueEntry[] = [];
         let label = "All notebooks";
+        let batchLabel: string | null = null;
         const now = Date.now();
         for (const { notebook, sources, cards, title } of collected) {
           const sourceTitles = new Map(sources.map((source) => [source.id, source.title]));
           if (title) label = title;
           for (const card of cards) {
+            if (batchId !== null) {
+              if (card.batchId !== batchId) continue;
+              batchLabel = card.batchSourceSummary ?? batchLabel;
+            }
             const due = card.due ? new Date(card.due).getTime() : now;
             if (!practice && due > now) continue;
             queue.push({
@@ -130,6 +138,9 @@ function ReviewSession() {
               sourceTitle: sourceTitles.get(card.sourceId ?? -1) ?? null
             });
           }
+        }
+        if (batchLabel) {
+          label = batchLabel;
         }
         setSession({
           key: notebookParam ?? "all",
@@ -152,7 +163,7 @@ function ReviewSession() {
         setLoading(false);
       }
     })();
-  }, [notebookParam, practice, router]);
+  }, [batchId, notebookParam, practice, router]);
 
   function grade(next: GradeKey) {
     const prev = sessionRef.current;

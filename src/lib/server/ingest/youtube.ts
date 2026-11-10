@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from '../auth';
 import { ownNotebook } from '../notebooks';
 import { ingestTextSource } from './ingest';
+import { YOUTUBE_INGEST_LIMIT, rateLimitResponse } from '../ratelimit';
 
 export const YOUTUBE_URL_HOSTS = new Set(['youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com']);
 
@@ -148,6 +149,12 @@ export async function youtubeSourceCreate(
     const notebook = await ownNotebook(db, user.id, notebookId);
     if (!notebook) {
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+
+    // This route fetches from YouTube and writes many chunks; gate per user.
+    const limited = await rateLimitResponse(db, `ingest-youtube:${user.id}`, YOUTUBE_INGEST_LIMIT);
+    if (limited) {
+      return limited;
     }
 
     let parsedBody: unknown;

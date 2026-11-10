@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { verifySessionCookie } from './lib/server/session-cookie';
 
 const SESSION_COOKIE = 'sl_session';
 const FORCE_CHANGE_PATH = '/change-password';
@@ -15,23 +16,17 @@ interface SessionState {
  * the visitor as signed in. Otherwise `/login` bounces them back to `/`, the
  * page's 401 handler sends them to `/login`, and the app flickers on skeletons
  * forever.
+ *
+ * The cookie is signed, so this check needs no network call. Revocation and
+ * disabled accounts are still enforced by the API layer on every data request,
+ * which is what the pages ultimately depend on.
  */
 async function sessionState(req: NextRequest): Promise<SessionState> {
-  const cookie = req.headers.get('cookie');
-  if (!cookie) return { valid: false, mustChangePassword: false };
-  try {
-    const res = await fetch(new URL('/api/auth/me', req.url), {
-      headers: { cookie, accept: 'application/json' },
-      cache: 'no-store'
-    });
-    if (!res.ok) return { valid: false, mustChangePassword: false };
-    const body = (await res.json().catch(() => null)) as
-      | { mustChangePassword?: boolean }
-      | null;
-    return { valid: true, mustChangePassword: Boolean(body?.mustChangePassword) };
-  } catch {
-    return { valid: false, mustChangePassword: false };
-  }
+  const value = req.cookies.get(SESSION_COOKIE)?.value;
+  if (!value) return { valid: false, mustChangePassword: false };
+  const session = await verifySessionCookie(value);
+  if (!session) return { valid: false, mustChangePassword: false };
+  return { valid: true, mustChangePassword: session.mustChangePassword };
 }
 
 export async function middleware(req: NextRequest) {
@@ -69,5 +64,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next|icon|favicon.ico|.*\\.).*)']
+  matcher: ['/((?!api|_next|icon|favicon.ico|.*\\\\.).*)']
 };

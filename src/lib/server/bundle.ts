@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from './auth';
 import { ownNotebook } from './notebooks';
 import { listSources } from './ingest/ingest';
-import { listCardsWithReview } from './cards';
+import { listCardBatches, listCardsWithReview } from './cards';
 import { listChatMessages } from './chat';
 
 export async function notebookBundle(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
@@ -18,9 +18,10 @@ export async function notebookBundle(db: Client, req: Request, idRaw: string): P
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
     }
 
-    const [sources, cards, messages] = await Promise.all([
+    const [sources, cards, batches, messages] = await Promise.all([
       listSources(db, notebookId),
       listCardsWithReview(db, notebookId),
+      listCardBatches(db, notebookId),
       listChatMessages(db, notebookId)
     ]);
 
@@ -29,6 +30,7 @@ export async function notebookBundle(db: Client, req: Request, idRaw: string): P
       title: notebook.title,
       sources,
       cards,
+      batches,
       messages
     });
   } catch (error) {

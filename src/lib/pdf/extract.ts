@@ -18,6 +18,7 @@ async function loadPdfjs(): Promise<typeof import('pdfjs-dist')> {
 export interface ExtractedPdf {
   pageCount: number;
   text: string;
+  pages: string[];
 }
 
 export async function extractPdfText(data: ArrayBuffer): Promise<ExtractedPdf> {
@@ -48,6 +49,8 @@ export async function extractPdfText(data: ArrayBuffer): Promise<ExtractedPdf> {
   const pageCount = pdf.numPages;
   await task.destroy();
 
-  const text = pageTexts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  return { pageCount, text };
+  // Form feed is the page separator: the server stores this text verbatim and
+  // the chapter scanner splits it back into pages.
+  const text = pageTexts.join('\f');
+  return { pageCount, text, pages: pageTexts };
 }

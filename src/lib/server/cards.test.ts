@@ -9,8 +9,30 @@ import { applySchema, makeLocalDb } from '@/lib/db';
 import { createNotebook } from './notebooks';
 import { createUser, createSession } from './repo';
 import { ingestTextSource } from './ingest/ingest';
-import { createCard, listCards, dueQueue, gradeCard, streakDays, deleteCard, cardOwned, updateCard } from './cards';
-import { cardsAdd, cardsList, cardsDue, cardsEdit, cardsDelete, cardsGrade, cardsGenerate } from './cards';
+import {
+  createCard,
+  listCards,
+  listCardsWithReview,
+  listCardBatches,
+  dueQueue,
+  gradeCard,
+  streakDays,
+  deleteCard,
+  cardOwned,
+  updateCard,
+  normalizeFront,
+  stratifiedSample
+} from './cards';
+import {
+  cardsAdd,
+  cardsList,
+  cardsDue,
+  cardsEdit,
+  cardsDelete,
+  cardsGrade,
+  cardsGenerate,
+  cardsBatchAdd
+} from './cards';
 import { Rating } from './fsrs';
 
 function makeRequest(url: string, body: string | null, token: string | null, method = 'POST'): Request {
@@ -120,6 +142,8 @@ describe('cards handlers', () => {
   let userId: number;
   let token: string;
   let notebookId: number;
+  let sourceId: number;
+  let pagedSourceId: number;
   let foreignToken: string;
   let foreignSourceId: number;
 
@@ -130,11 +154,20 @@ describe('cards handlers', () => {
     userId = user.id;
     token = await createSession(db, userId);
     notebookId = (await createNotebook(db, userId, 'Handler notebook')).id;
-    await ingestTextSource(db, {
+    sourceId = (await ingestTextSource(db, {
       notebookId,
       title: 'Biology notes',
       text: 'Photosynthesis converts light energy into chemical energy. The Calvin cycle fixes carbon dioxide in the stroma.'
-    });
+    })).id;
+    pagedSourceId = (await ingestTextSource(db, {
+      notebookId,
+      title: 'Paged slides',
+      kind: 'pdf',
+      pages: [
+        'Chapter 1: Light reactions. Chlorophyll absorbs photons in the thylakoid membrane.',
+        'Chapter 2: Calvin cycle. RuBisCO fixes carbon dioxide in the stroma.'
+      ]
+    })).id;
     const other = await createUser(db, { email: 'other@x.local', passwordHash: await hashPassword('p'), role: 'user' });
     foreignToken = await createSession(db, other.id);
     const foreignNotebook = await createNotebook(db, other.id, 'Foreign notebook');
@@ -216,7 +249,7 @@ describe('cards handlers', () => {
       db,
       makeRequest(
         `http://x/api/notebooks/${notebookId}/cards/generate`,
-        JSON.stringify({ sourceId: foreignSourceId }),
+        JSON.stringify({ sources: [{ sourceId: foreignSourceId }] }),
         token
       ),
       String(notebookId),
@@ -239,29 +272,81 @@ describe('cards handlers', () => {
     expect(add.status).toBe(404);
   });
 
-  it('cardsGenerate persists mocked batched cards and wires the queue', async () => {
-    const generate = async (): Promise<string> =>
-      JSON.stringify([
+  it('cardsGenerate returns drafts without writing cards and uses one call', async () => {
+    let calls = 0;
+    const prompts: string[] = [];
+    const generate = async (_key: string, _system: string, prompt: string): Promise<string> => {
+      calls += 1;
+      prompts.push(prompt);
+      return JSON.stringify([
         { front: 'G1', back: 'B1' },
         { front: 'G2', back: 'B2' },
         { front: 'G3', back: 'B3' }
       ]);
+    };
     const res = await cardsGenerate(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/cards/generate`, JSON.stringify({ topic: 'photosynthesis' }), token),
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId }] }),
+        token
+      ),
       String(notebookId),
       { completeBatch: generate, resolveLlmKey: async () => 'mock-key' }
     );
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { created: number };
-    expect(body.created).toBe(3);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      drafts: Array<{ front: string; sourceId: number | null }>;
+      skippedDuplicates: number;
+      sourceSummary: string;
+    };
+    expect(body.drafts.map((draft) => draft.front)).toEqual(['G1', 'G2', 'G3']);
+    expect(body.drafts.every((draft) => draft.sourceId === sourceId)).toBe(true);
+    expect(body.skippedDuplicates).toBe(0);
+    expect(body.sourceSummary).toContain('Biology notes');
+    expect(calls).toBe(1);
+    expect(prompts[0]).toContain('Photosynthesis');
+
     const listBody = (await (await cardsList(db, makeRequest(`http://x/api/notebooks/${notebookId}/cards`, null, token, 'GET'), String(notebookId))).json()) as {
       cards: Array<{ front: string }>;
     };
-    expect(listBody.cards.map((card) => card.front)).toEqual(expect.arrayContaining(['G1', 'G2', 'G3']));
+    expect(listBody.cards.map((card) => card.front)).not.toContain('G1');
   });
 
-  it('cardsGenerate retries once on malformed JSON then 502', async () => {
+  it('deduplicates in-batch and against existing notebook cards', async () => {
+    await cardsAdd(
+      db,
+      makeRequest(`http://x/api/notebooks/${notebookId}/cards`, JSON.stringify({ front: 'Dup front', back: 'Existing' }), token),
+      String(notebookId)
+    );
+    const res = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId }] }),
+        token
+      ),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'mock-key',
+        completeBatch: async () =>
+          JSON.stringify([
+            { front: 'DUP front!', back: 'Existing copy' },
+            { front: 'dup   front', back: 'Another copy' },
+            { front: 'Fresh card', back: 'Fresh back' }
+          ])
+      }
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      drafts: Array<{ front: string }>;
+      skippedDuplicates: number;
+    };
+    expect(body.drafts.map((draft) => draft.front)).toEqual(['Fresh card']);
+    expect(body.skippedDuplicates).toBe(2);
+  });
+
+  it('retries once on malformed JSON then 502', async () => {
     let calls = 0;
     const mock = async (): Promise<string> => {
       calls += 1;
@@ -269,7 +354,11 @@ describe('cards handlers', () => {
     };
     const res = await cardsGenerate(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/cards/generate`, JSON.stringify({ topic: 'photosynthesis' }), token),
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId }] }),
+        token
+      ),
       String(notebookId),
       { resolveLlmKey: async () => 'mock-key', completeBatch: mock }
     );
@@ -277,7 +366,7 @@ describe('cards handlers', () => {
     expect(calls).toBe(2);
   });
 
-  it('cardsGenerate answers 400 when neither topic nor sourceId', async () => {
+  it('answers 400 when no source is selected', async () => {
     const res = await cardsGenerate(
       db,
       makeRequest(`http://x/api/notebooks/${notebookId}/cards/generate`, JSON.stringify({}), token),
@@ -287,25 +376,272 @@ describe('cards handlers', () => {
     expect(res.status).toBe(400);
   });
 
-  it('cardsGenerate answers 503 without a key', async () => {
+  it('answers 503 without a key', async () => {
     const res = await cardsGenerate(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/cards/generate`, JSON.stringify({ topic: 'photosynthesis' }), token),
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId }] }),
+        token
+      ),
       String(notebookId),
       { resolveLlmKey: async () => null }
     );
     expect(res.status).toBe(503);
   });
 
-  it('caps generation at 10 cards', async () => {
-    const twelve = Array.from({ length: 12 }, (_, index) => ({ front: `C${index}`, back: `B${index}` }));
+  it('clamps the requested card count to 20', async () => {
+    const many = Array.from({ length: 25 }, (_, index) => ({ front: `C${index}`, back: `B${index}` }));
     const res = await cardsGenerate(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/cards/generate`, JSON.stringify({ topic: 'photosynthesis' }), token),
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId }], count: 50 }),
+        token
+      ),
       String(notebookId),
-      { resolveLlmKey: async () => 'mock-key', completeBatch: async () => JSON.stringify(twelve) }
+      { resolveLlmKey: async () => 'mock-key', completeBatch: async () => JSON.stringify(many) }
     );
-    const body = (await res.json()) as { created: number };
-    expect(body.created).toBe(10);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { drafts: unknown[] };
+    expect(body.drafts).toHaveLength(20);
+  });
+
+  it('uses only the selected page range and clamps a too-wide range', async () => {
+    const prompts: string[] = [];
+    const res = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId: pagedSourceId, from: 1, to: 1 }] }),
+        token
+      ),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'mock-key',
+        completeBatch: async (_key, _system, prompt) => {
+          prompts.push(prompt);
+          return JSON.stringify([{ front: 'Paged card', back: 'Answer' }]);
+        }
+      }
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { sourceSummary: string };
+    expect(body.sourceSummary).toContain('Paged slides · pp. 1–1');
+    expect(prompts[0]).toContain('Chlorophyll');
+    expect(prompts[0]).not.toContain('RuBisCO');
+
+    const clamped = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId: pagedSourceId, from: 1, to: 99 }] }),
+        token
+      ),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'mock-key',
+        completeBatch: async () => JSON.stringify([{ front: 'Clamped card', back: 'Answer' }])
+      }
+    );
+    expect(clamped.status).toBe(200);
+    const clampedBody = (await clamped.json()) as { sourceSummary: string };
+    expect(clampedBody.sourceSummary).toContain('Paged slides · pp. 1–2');
+  });
+
+  it('rejects page ranges on sources without page information', async () => {
+    const res = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId, from: 1, to: 1 }] }),
+        token
+      ),
+      String(notebookId),
+      { resolveLlmKey: async () => 'mock-key', completeBatch: async () => '[]' }
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it('scopes the focus FTS filter to the selected sources', async () => {
+    const prompts: string[] = [];
+    const res = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId: pagedSourceId }], focus: 'photosynthesis' }),
+        token
+      ),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'mock-key',
+        completeBatch: async (_key, _system, prompt) => {
+          prompts.push(prompt);
+          return JSON.stringify([{ front: 'Focused card', back: 'Answer' }]);
+        }
+      }
+    );
+    expect(res.status).toBe(200);
+    expect(prompts[0]).not.toContain('Photosynthesis converts');
+    expect(prompts[0]).toContain('Focus instruction: photosynthesis');
+  });
+});
+
+describe('stratified generation sampling', () => {
+  it('covers the start, middle, and end of a source', () => {
+    const candidates = Array.from({ length: 30 }, (_, index) => ({
+      id: index + 1,
+      text: `chunk-${index}-${'x'.repeat(400)}`
+    }));
+    const picked = stratifiedSample(candidates, new Set(), 5000);
+    const ids = picked.map((chunk) => chunk.id);
+    expect(ids).toContain(1);
+    expect(ids.some((id) => id > 10 && id < 20)).toBe(true);
+    expect(ids.some((id) => id > 24)).toBe(true);
+  });
+
+  it('prefers focus hits within each stratum', () => {
+    const candidates = Array.from({ length: 12 }, (_, index) => ({
+      id: index + 1,
+      text: `chunk-${index}-${'x'.repeat(200)}`
+    }));
+    const picked = stratifiedSample(candidates, new Set([2, 5, 9]), 1200);
+    expect(picked.map((chunk) => chunk.id)).toEqual(expect.arrayContaining([2, 5, 9]));
+  });
+});
+
+describe('card batch commit', () => {
+  let db: Client;
+  let userId: number;
+  let token: string;
+  let notebookId: number;
+  let sourceId: number;
+
+  beforeAll(async () => {
+    db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-batch-')), 'batch.db'));
+    await applySchema(db);
+    const user = await createUser(db, { email: 'batch@x.local', passwordHash: await hashPassword('p'), role: 'user' });
+    userId = user.id;
+    token = await createSession(db, userId);
+    notebookId = (await createNotebook(db, userId, 'Batch notebook')).id;
+    sourceId = (await ingestTextSource(db, {
+      notebookId,
+      title: 'Batch source',
+      text: 'Batch material about cell membranes and diffusion.'
+    })).id;
+  });
+
+  afterAll(async () => {
+    await db.close();
+  });
+
+  it('creates a batch, its cards, and their reviews atomically', async () => {
+    const res = await cardsBatchAdd(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/batch`,
+        JSON.stringify({
+          cards: [
+            { front: 'What is diffusion?', back: 'Movement down a concentration gradient.', sourceId },
+            { front: 'What is a membrane?', back: 'A selective barrier.' }
+          ],
+          sourceSummary: 'Batch source · pp. 1–2',
+          focus: 'membranes'
+        }),
+        token
+      ),
+      String(notebookId)
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as {
+      created: number;
+      batch: { id: number; cardCount: number; sourceSummary: string; focus: string | null };
+    };
+    expect(body.created).toBe(2);
+    expect(body.batch.cardCount).toBe(2);
+    expect(body.batch.sourceSummary).toBe('Batch source · pp. 1–2');
+    expect(body.batch.focus).toBe('membranes');
+
+    const cards = await listCardsWithReview(db, notebookId);
+    expect(cards).toHaveLength(2);
+    expect(cards.every((card) => card.batchId === body.batch.id)).toBe(true);
+    expect(cards.every((card) => card.batchSourceSummary === 'Batch source · pp. 1–2')).toBe(true);
+    const reviews = await db.execute({ sql: 'SELECT COUNT(*) AS n FROM reviews', args: [] });
+    expect(Number(reviews.rows[0]!.n)).toBe(2);
+    const batches = await listCardBatches(db, notebookId);
+    expect(batches).toHaveLength(1);
+    expect(batches[0]!.cardCount).toBe(2);
+  });
+
+  it('validates card limits, count, and ownership', async () => {
+    const tooMany = Array.from({ length: 31 }, (_, index) => ({ front: `F${index}`, back: `B${index}` }));
+    const manyRes = await cardsBatchAdd(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/batch`,
+        JSON.stringify({ cards: tooMany, sourceSummary: 'Too many' }),
+        token
+      ),
+      String(notebookId)
+    );
+    expect(manyRes.status).toBe(400);
+
+    const emptyRes = await cardsBatchAdd(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/batch`,
+        JSON.stringify({ cards: [], sourceSummary: 'Empty' }),
+        token
+      ),
+      String(notebookId)
+    );
+    expect(emptyRes.status).toBe(400);
+
+    const longRes = await cardsBatchAdd(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/batch`,
+        JSON.stringify({
+          cards: [{ front: 'x'.repeat(301), back: 'ok' }],
+          sourceSummary: 'Long front'
+        }),
+        token
+      ),
+      String(notebookId)
+    );
+    expect(longRes.status).toBe(400);
+
+    const foreignRes = await cardsBatchAdd(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/batch`,
+        JSON.stringify({
+          cards: [{ front: 'F', back: 'B', sourceId: 99999 }],
+          sourceSummary: 'Foreign'
+        }),
+        token
+      ),
+      String(notebookId)
+    );
+    expect(foreignRes.status).toBe(404);
+  });
+
+  it('keeps cards when a batch is deleted and removes batches with the notebook', async () => {
+    const cards = await listCardsWithReview(db, notebookId);
+    const batchId = cards[0]!.batchId!;
+    await db.execute({ sql: 'DELETE FROM card_batches WHERE id = ?', args: [batchId] });
+    const afterDelete = await listCardsWithReview(db, notebookId);
+    expect(afterDelete).toHaveLength(2);
+    expect(afterDelete.every((card) => card.batchId == null)).toBe(true);
+
+    await db.execute({ sql: 'DELETE FROM notebooks WHERE id = ?', args: [notebookId] });
+    const batches = await db.execute({ sql: 'SELECT COUNT(*) AS n FROM card_batches', args: [] });
+    expect(Number(batches.rows[0]!.n)).toBe(0);
+  });
+});
+
+describe('front normalization', () => {
+  it('ignores case, punctuation, and whitespace differences', () => {
+    expect(normalizeFront('  What is   ATP?! ')).toBe(normalizeFront('what is atp'));
   });
 });
