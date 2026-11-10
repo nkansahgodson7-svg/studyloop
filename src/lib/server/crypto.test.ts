@@ -1,4 +1,4 @@
-import { createCipheriv, createHmac, randomBytes } from 'node:crypto';
+import { createCipheriv, createHmac, randomBytes, scryptSync } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   decryptSecret,
@@ -33,12 +33,12 @@ describe('password hashing', () => {
   it('verifies a scrypt2 hash produced by another process', async () => {
     const stored = 'scrypt2$32768$8$1$' + Buffer.from('salt-bytes-here!').toString('base64url') + '$';
     const salt = Buffer.from('salt-bytes-here!');
-    const key = (await scrypt('pw-from-scrypt2', salt, 32, {
+    const key = scryptSync('pw-from-scrypt2', salt, 32, {
       N: 32768,
       r: 8,
       p: 1,
       maxmem: 128 * 1024 * 1024
-    })) as Buffer;
+    });
     const full = stored + key.toString('base64url');
 
     expect(await verifyPassword('pw-from-scrypt2', full)).toBe(true);
@@ -48,7 +48,7 @@ describe('password hashing', () => {
 
   it('still verifies legacy scrypt hashes and flags them for rehash', async () => {
     const salt = Buffer.from('legacy-salt-16b!');
-    const key = (await scrypt('legacy-pw', salt, 32)) as Buffer;
+    const key = scryptSync('legacy-pw', salt, 32);
     const legacy = `scrypt$${salt.toString('base64url')}$${key.toString('base64url')}`;
 
     expect(await verifyPassword('legacy-pw', legacy)).toBe(true);
