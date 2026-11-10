@@ -32,6 +32,12 @@ interface SessionState {
   grades: Record<GradeKey, number>;
 }
 
+function resetCardStyles(el: HTMLElement) {
+  el.style.transform = "";
+  el.style.opacity = "";
+  el.style.borderColor = "";
+}
+
 function cueHotColor(grade: GradeKey | null): string {
   switch (grade) {
     case "again":
@@ -222,6 +228,10 @@ function ReviewSession() {
   useEffect(() => {
     const card = cardRef.current;
     if (!card || !session || !session.revealed || session.finished) return;
+    // React reuses this DOM node across cards, so inline styles written by a
+    // previous commit() would otherwise carry over and hide the next card.
+    card.style.transition = "";
+    resetCardStyles(card);
     const cues: Partial<Record<GradeKey, HTMLElement>> = {};
     for (const cue of document.querySelectorAll<HTMLElement>(".swipe-cue[data-cue]")) {
       cues[cue.dataset.cue as GradeKey] = cue;
@@ -262,10 +272,15 @@ function ReviewSession() {
     };
     const resetCard = () => {
       card.style.transition = "transform 0.2s var(--ease-out), opacity 0.16s ease";
-      card.style.transform = "";
-      card.style.opacity = "";
-      card.style.borderColor = "";
+      resetCardStyles(card);
       clearCues();
+      if (swipe.pointerId !== null) {
+        try {
+          card.releasePointerCapture(swipe.pointerId);
+        } catch {
+          /* capture already released or never taken */
+        }
+      }
       swipe.pointerId = null;
       swipe.rawX = 0;
       swipe.rawY = 0;
@@ -288,7 +303,13 @@ function ReviewSession() {
       card.style.transition = "transform 0.26s var(--ease-out), opacity 0.22s ease";
       card.style.transform = `translate(${vector.x * distance}px, ${vector.y * distance}px) rotate(${rotate}deg)`;
       card.style.opacity = "0";
-      window.setTimeout(() => grade(next), 200);
+      window.setTimeout(() => {
+        // Clear the exit styles before advancing so the next card paints
+        // visible, and so a blocked grade() leaves a usable card behind.
+        card.style.transition = "";
+        resetCardStyles(card);
+        grade(next);
+      }, 200);
     };
 
     const onDown = (event: PointerEvent) => {
