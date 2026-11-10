@@ -14,7 +14,7 @@ import { DEMO_EMAIL } from "@/lib/client/demo";
 
 export default function SettingsPage() {
   const { toast } = useToast();
-  const { open, close } = useSheet();
+  const { open } = useSheet();
   const router = useRouter();
   const [me, setMe] = useState(() => meCache.get());
   const [summary, setSummary] = useState(() => summaryCache.get());
@@ -243,7 +243,7 @@ export default function SettingsPage() {
             </>
           )}
         </button>
-        <p className="tiny muted center">StudyLoop mockup · v1.0 · Local storage only</p>
+        <p className="tiny muted center">StudyLoop · v1.0</p>
       </div>
     </ScreenSection>
   );
@@ -328,7 +328,7 @@ function KeySheet({ hasKey, onSaved }: { hasKey: boolean; onSaved: () => void })
               disabled={busy}
             />
           </div>
-          <p className="hint">The real app encrypts this server-side with AES-GCM. This mockup only stores a flag locally.</p>
+          <p className="hint">Encrypted server-side with AES-GCM and never shown again.</p>
         </>
       }
       foot={

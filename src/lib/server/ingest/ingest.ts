@@ -99,6 +99,18 @@ export async function ingestTextSource(
   return { id: sourceId, title, chunks: chunks.length };
 }
 
+export async function sourceInNotebook(
+  db: Client,
+  notebookId: number,
+  sourceId: number
+): Promise<boolean> {
+  const result = await db.execute({
+    sql: 'SELECT 1 FROM sources WHERE id = ? AND notebook_id = ?',
+    args: [sourceId, notebookId]
+  });
+  return result.rows.length > 0;
+}
+
 export async function listSources(db: Client, notebookId: number): Promise<SourceRow[]> {
   const result = await db.execute({
     sql: `SELECT ${SOURCE_COLUMNS} FROM sources WHERE notebook_id = ? ORDER BY created_at DESC, id DESC`,

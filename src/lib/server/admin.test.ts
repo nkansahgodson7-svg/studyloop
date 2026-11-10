@@ -233,6 +233,7 @@ describe('admin create user', () => {
 
 describe('admin disable enable APIs', () => {
   let db: Client;
+  let adminId: number;
   let adminToken: string;
   let userId: number;
   let userSession: string;
@@ -241,6 +242,7 @@ describe('admin disable enable APIs', () => {
     db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-admdis-')), 'admdis.db'));
     await applySchema(db);
     const admin = await createUser(db, { email: 'boss2@test.local', passwordHash: await hashPassword(PASSWORD), role: 'admin' });
+    adminId = admin.id;
     adminToken = await createSession(db, admin.id);
     const user = await adminCreateUser(db, await adminRequest('http://x/api/admin/users', 'POST', {
       email: 'target@test.local', password: 'target-password-long'
@@ -294,6 +296,16 @@ describe('admin disable enable APIs', () => {
       disabled: true
     }, adminToken), '999');
     expect(res.status).toBe(404);
+  });
+
+  it('refuses to let an admin disable their own account', async () => {
+    const res = await adminSetDisabled(db, await adminRequest(`http://x/api/admin/users/${adminId}`, 'PATCH', {
+      disabled: true
+    }, adminToken), String(adminId));
+    expect(res.status).toBe(400);
+
+    const row = await db.execute({ sql: 'SELECT disabled FROM users WHERE id = ?', args: [adminId] });
+    expect(Number(row.rows[0]!.disabled)).toBe(0);
   });
 });
 

@@ -2,7 +2,7 @@ import type { Client } from '@libsql/client';
 import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from './auth';
 import { ownNotebook } from './notebooks';
-import { searchChunks } from './ingest/ingest';
+import { searchChunks, sourceInNotebook } from './ingest/ingest';
 import { resolveLlmKey } from './chat';
 import { applyGrade, fromReviewRow, newReview, toReviewColumns, type StoredReview } from './fsrs';
 
@@ -319,9 +319,14 @@ function parseBatchCards(raw: string): Array<{ front: string; back: string }> {
 
 async function buildGenerationContext(db: Client, notebookId: number, topic: string | null, sourceId: number | null): Promise<string | null> {
   if (sourceId != null && Number.isInteger(sourceId)) {
+    // Scope by notebook as well as source: a caller must not be able to read
+    // another user's source by guessing its id.
     const result = await db.execute({
-      sql: 'SELECT text FROM source_chunks WHERE source_id = ? ORDER BY ord LIMIT 12',
-      args: [sourceId]
+      sql: `SELECT sc.text FROM source_chunks sc
+            JOIN sources s ON s.id = sc.source_id
+            WHERE sc.source_id = ? AND s.notebook_id = ?
+            ORDER BY sc.ord LIMIT 12`,
+      args: [sourceId, notebookId]
     });
     const text = result.rows.map((row) => String(row.text)).join('\n\n').slice(0, 8000);
     return text.length > 0 ? text : null;
@@ -359,6 +364,9 @@ export async function cardsGenerate(
     const sourceId = typeof body.sourceId === 'number' && Number.isInteger(body.sourceId) ? body.sourceId : null;
     if (!topic && sourceId == null) {
       return NextResponse.json({ error: 'topic or sourceId is required' }, { status: 400 });
+    }
+    if (sourceId != null && !(await sourceInNotebook(db, notebookId, sourceId))) {
+      return NextResponse.json({ error: 'unknown source' }, { status: 404 });
     }
 
     const resolveKey = deps.resolveLlmKey ?? resolveLlmKey;
@@ -456,6 +464,9 @@ export async function cardsAdd(db: Client, req: Request, idRaw: string): Promise
       );
     }
     const sourceId = typeof body.sourceId === 'number' && Number.isInteger(body.sourceId) ? body.sourceId : null;
+    if (sourceId != null && !(await sourceInNotebook(db, notebookId, sourceId))) {
+      return NextResponse.json({ error: 'unknown source' }, { status: 404 });
+    }
     const card = await createCard(db, notebookId, { sourceId, front, back });
     return NextResponse.json(card, { status: 201 });
   } catch (error) {

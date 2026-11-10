@@ -9,7 +9,10 @@ data/*.db-journal
 .env.*
 !.env.example
 coverage/
+test-results/
+playwright-report/
+.opencode/
+.perch/
 *.tsbuildinfo
 next-env.d.ts
 .vercel
-.opencode/

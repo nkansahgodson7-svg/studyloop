@@ -80,8 +80,9 @@ export async function adminCreateUser(db: Client, req: Request): Promise<NextRes
 }
 
 export async function adminSetDisabled(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  let admin: Awaited<ReturnType<typeof requireAdmin>>;
   try {
-    await requireAdmin(db, req);
+    admin = await requireAdmin(db, req);
   } catch (error) {
     return errorResponse(error);
   }
@@ -102,9 +103,20 @@ export async function adminSetDisabled(db: Client, req: Request, idRaw: string):
     return NextResponse.json({ error: 'disabled boolean required' }, { status: 400 });
   }
 
-  const exists = await db.execute({ sql: 'SELECT id FROM users WHERE id = ?', args: [id] });
-  if (exists.rows.length === 0) {
+  const target = await findTargetUser(db, id);
+  if (!target) {
     return NextResponse.json({ error: 'unknown user' }, { status: 404 });
+  }
+  if (body.disabled && id === admin.id) {
+    return NextResponse.json({ error: 'you cannot disable your own account' }, { status: 400 });
+  }
+  if (
+    body.disabled &&
+    target.role === 'admin' &&
+    !target.disabled &&
+    (await countAdmins(db)) <= 1
+  ) {
+    return NextResponse.json({ error: 'cannot disable the last admin' }, { status: 400 });
   }
 
   await setUserDisabled(db, id, body.disabled);
@@ -119,9 +131,9 @@ function parseUserId(idRaw: string): number | null {
 async function findTargetUser(
   db: Client,
   id: number
-): Promise<{ id: number; email: string; role: 'admin' | 'user' } | null> {
+): Promise<{ id: number; email: string; role: 'admin' | 'user'; disabled: boolean } | null> {
   const result = await db.execute({
-    sql: 'SELECT id, email, role FROM users WHERE id = ?',
+    sql: 'SELECT id, email, role, disabled FROM users WHERE id = ?',
     args: [id]
   });
   const row = result.rows[0];
@@ -129,7 +141,8 @@ async function findTargetUser(
   return {
     id: Number(row['id']),
     email: String(row['email']),
-    role: row['role'] === 'admin' ? 'admin' : 'user'
+    role: row['role'] === 'admin' ? 'admin' : 'user',
+    disabled: Number(row['disabled']) === 1
   };
 }
 

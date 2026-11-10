@@ -78,7 +78,15 @@ export function toReviewColumns(review: StoredReview): { due: string; stability:
 }
 
 export function fromReviewRow(row: StoredReviewRow): StoredReview {
-  const meta = row.fsrs_meta ? (JSON.parse(row.fsrs_meta) as TsCardLike) : null;
+  let meta: TsCardLike | null = null;
+  if (row.fsrs_meta) {
+    try {
+      meta = JSON.parse(row.fsrs_meta) as TsCardLike;
+    } catch {
+      // Fall back to the scalar columns if stored metadata is corrupt.
+      meta = null;
+    }
+  }
   if (meta) {
     return toStoredReview(meta);
   }

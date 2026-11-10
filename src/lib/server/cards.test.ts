@@ -121,6 +121,7 @@ describe('cards handlers', () => {
   let token: string;
   let notebookId: number;
   let foreignToken: string;
+  let foreignSourceId: number;
 
   beforeAll(async () => {
     db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-cardsh-')), 'cards-h.db'));
@@ -136,6 +137,13 @@ describe('cards handlers', () => {
     });
     const other = await createUser(db, { email: 'other@x.local', passwordHash: await hashPassword('p'), role: 'user' });
     foreignToken = await createSession(db, other.id);
+    const foreignNotebook = await createNotebook(db, other.id, 'Foreign notebook');
+    foreignSourceId = (await ingestTextSource(db, {
+      notebookId: foreignNotebook.id,
+      userId: other.id,
+      title: 'Private notes',
+      text: 'This source belongs to another user and must never be used for generation.'
+    })).id;
   });
 
   afterAll(async () => {
@@ -201,6 +209,34 @@ describe('cards handlers', () => {
     expect(add.status).toBe(404);
     const del = await cardsDelete(db, makeRequest(`http://x/api/cards/1`, null, foreignToken, 'DELETE'), '1');
     expect(del.status).toBe(404);
+  });
+
+  it('rejects a source id that belongs to another notebook', async () => {
+    const generate = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sourceId: foreignSourceId }),
+        token
+      ),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'mock-key',
+        completeBatch: async () => JSON.stringify([{ front: 'Leaked', back: 'Leaked' }])
+      }
+    );
+    expect(generate.status).toBe(404);
+
+    const add = await cardsAdd(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards`,
+        JSON.stringify({ front: 'x', back: 'x', sourceId: foreignSourceId }),
+        token
+      ),
+      String(notebookId)
+    );
+    expect(add.status).toBe(404);
   });
 
   it('cardsGenerate persists mocked batched cards and wires the queue', async () => {
