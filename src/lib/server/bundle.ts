@@ -4,7 +4,6 @@ import { errorResponse, requireUser } from './auth';
 import { ownNotebook } from './notebooks';
 import { listSources } from './ingest/ingest';
 import { listCardBatches, listCardsWithReview } from './cards';
-import { listChatMessages } from './chat';
 
 export async function notebookBundle(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
   try {
@@ -18,11 +17,10 @@ export async function notebookBundle(db: Client, req: Request, idRaw: string): P
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
     }
 
-    const [sources, cards, batches, messages] = await Promise.all([
+    const [sources, cards, batches] = await Promise.all([
       listSources(db, notebookId),
       listCardsWithReview(db, notebookId),
-      listCardBatches(db, notebookId),
-      listChatMessages(db, notebookId)
+      listCardBatches(db, notebookId)
     ]);
 
     return NextResponse.json({
@@ -30,8 +28,7 @@ export async function notebookBundle(db: Client, req: Request, idRaw: string): P
       title: notebook.title,
       sources,
       cards,
-      batches,
-      messages
+      batches
     });
   } catch (error) {
     return errorResponse(error);

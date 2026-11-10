@@ -184,7 +184,9 @@ export async function listUsers(db: Client): Promise<AdminUserRow[]> {
                     JOIN notebooks nb ON nb.id = c.notebook_id
                   UNION ALL
                   SELECT nb.user_id AS uid, m.created_at AS ts
-                    FROM chat_messages m JOIN notebooks nb ON nb.id = m.notebook_id
+                    FROM chat_messages m
+                    JOIN chat_conversations c ON c.id = m.conversation_id
+                    JOIN notebooks nb ON nb.id = c.notebook_id
                    WHERE m.role = 'user'
                   UNION ALL
                   SELECT se.user_id AS uid, se.created_at AS ts
@@ -208,7 +210,9 @@ export async function listUsers(db: Client): Promise<AdminUserRow[]> {
                      JOIN cards c ON c.id = rl.card_id
                      JOIN notebooks nb ON nb.id = c.notebook_id
                      WHERE nb.user_id = u.id AND rl.graded_at >= ?) AS reviews7d,
-                   (SELECT COUNT(*) FROM chat_messages m JOIN notebooks nb ON nb.id = m.notebook_id
+                   (SELECT COUNT(*) FROM chat_messages m
+                     JOIN chat_conversations c ON c.id = m.conversation_id
+                     JOIN notebooks nb ON nb.id = c.notebook_id
                      WHERE nb.user_id = u.id AND m.role = 'user') AS chats,
                    (SELECT COUNT(*) FROM cards c JOIN notebooks nb ON nb.id = c.notebook_id
                      WHERE nb.user_id = u.id AND c.generated_at IS NOT NULL) AS generated_cards
@@ -298,7 +302,14 @@ export async function deleteUser(db: Client, userId: number): Promise<boolean> {
     { sql: `DELETE FROM quiz_items WHERE notebook_id IN (${notebookFilter})`, args: [userId] },
     { sql: `DELETE FROM review_log WHERE card_id IN (${cardFilter})`, args: [userId] },
     { sql: `DELETE FROM reviews WHERE card_id IN (${cardFilter})`, args: [userId] },
-    { sql: `DELETE FROM chat_messages WHERE notebook_id IN (${notebookFilter})`, args: [userId] },
+    {
+      sql: `DELETE FROM chat_messages
+            WHERE conversation_id IN (
+              SELECT id FROM chat_conversations WHERE notebook_id IN (${notebookFilter})
+            )`,
+      args: [userId]
+    },
+    { sql: `DELETE FROM chat_conversations WHERE notebook_id IN (${notebookFilter})`, args: [userId] },
     { sql: `DELETE FROM source_chunks WHERE source_id IN (${sourceFilter})`, args: [userId] },
     { sql: `DELETE FROM cards WHERE notebook_id IN (${notebookFilter})`, args: [userId] },
     { sql: `DELETE FROM sources WHERE notebook_id IN (${notebookFilter})`, args: [userId] },

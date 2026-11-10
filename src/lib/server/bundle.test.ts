@@ -55,17 +55,13 @@ describe('notebook bundle', () => {
       String(notebookId)
     );
     expect(batchRes.status).toBe(201);
-    await db.execute({
-      sql: "INSERT INTO chat_messages (notebook_id, role, content, citations) VALUES (?, 'user', ?, '[]')",
-      args: [notebookId, 'What is an alkene?']
-    });
   });
 
   afterAll(async () => {
     await db.close();
   });
 
-  it('returns sources, cards, batches, and chat in one response', async () => {
+  it('returns sources, cards, and batches in one response', async () => {
     const res = await notebookBundle(db, await reqWithCookie(`http://x/api/notebooks/${notebookId}/bundle`, token), String(notebookId));
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
@@ -81,7 +77,6 @@ describe('notebook bundle', () => {
         generatedAt: string | null;
       }>;
       batches: Array<{ id: number; sourceSummary: string; focus: string | null; cardCount: number }>;
-      messages: Array<{ content: string }>;
     };
     expect(body.id).toBe(notebookId);
     expect(body.title).toBe('Organic Chemistry');
@@ -106,8 +101,7 @@ describe('notebook bundle', () => {
     expect(generated.batchSourceSummary).toBe('Alkenes · pp. 1–2');
     expect(typeof generated.batchCreatedAt).toBe('string');
     expect(typeof generated.generatedAt).toBe('string');
-
-    expect(body.messages.map((message) => message.content)).toContain('What is an alkene?');
+    expect(body).not.toHaveProperty('messages');
   });
 
   it('rejects foreign, invalid, and unauthenticated requests', async () => {

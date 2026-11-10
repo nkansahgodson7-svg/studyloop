@@ -9,7 +9,7 @@ const PURGE_PROBABILITY = 0.02;
 const HOUR_MS = 60 * 60 * 1000;
 
 /** Per-user budgets for the routes that call a paid LLM or write many rows. */
-export const LLM_CHAT_LIMIT = { max: 60, windowMs: HOUR_MS };
+export const LLM_CHAT_LIMIT = { max: 150, windowMs: HOUR_MS };
 export const LLM_GENERATE_LIMIT = { max: 30, windowMs: HOUR_MS };
 export const INGEST_LIMIT = { max: 20, windowMs: HOUR_MS };
 export const YOUTUBE_INGEST_LIMIT = { max: 10, windowMs: HOUR_MS };

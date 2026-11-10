@@ -22,8 +22,10 @@ is seeded by script, and admins can still create and manage accounts directly.
 - Notebooks: own workspace per user, each notebook has sources, chat, and a deck
 - Sources: PDF upload (client-side text extraction), YouTube URL → server-side
   transcript fetch, plain text/markdown paste
-- Chat: grounded in notebook sources via FTS5 keyword retrieval, answers cite
-  source titles; refuses when sources don't support the answer
+- Chat: multiple conversations per notebook, grounded in notebook sources via
+  FTS5 keyword retrieval when they help; every answer carries a grounding label
+  ("From your sources", "General knowledge", or "Sources + general") and an
+  optional list of the source segments it used
 - Quiz: MCQ + fill-in generation from selected topics, AI grading of answers
   (carried over conceptually from `ai-study-partner-react`)
 - Flashcards: auto-generation from a source/topic selection, manual creation and
@@ -107,7 +109,8 @@ sessions(token pk, user_id fk, expires_at)
 notebooks(id pk, user_id fk→users, title, created_at)
 sources(id pk, notebook_id fk, kind: 'pdf'|'youtube'|'text', title, url?, text, meta json, created_at)
 source_chunks(id pk, source_id fk, ord int, text)            -- indexed by FTS5
-chat_messages(id pk, notebook_id fk, role, content, citations json, created_at)
+chat_conversations(id pk, notebook_id fk, title, title_source, created_at, updated_at)
+chat_messages(id pk, conversation_id fk, role, content, grounding, sources json, status, created_at)
 cards(id pk, notebook_id fk, source_id fk?, front, back, created_at)
 reviews(card_id, due, stability, difficulty, ... FSRS state)
 quiz_items(id pk, notebook_id fk, kind: 'mcq'|'fillin', topic, payload json, created_at)
@@ -180,8 +183,9 @@ export async function createNotebook(userId: number, title: string): Promise<Not
 2. A user's notebooks are invisible to another user's session (403/404, tested)
 3. PDF ≤ 100 pages → source with extractable text stored; structure extracted ≤ 30s
 4. YouTube URL → transcript source created ≤ 60s with chunked, searchable text
-5. Chat answer to a source-supported question includes ≥ 1 citation; an
-   unsupportable question yields an explicit refusal (tested with mocked model)
+5. Chat answer to a source-supported question is labelled "From your sources"
+   and lists ≥ 1 used source; an unsupportable question is labelled "General
+   knowledge" with a verify note and no sources (tested with mocked model)
 6. "Generate flashcards" on a selection yields ≥ 8 editable cards ≤ 60s
 7. Rating a card (Again/Hard/Good/Easy) produces a FSRS-computed next due date;
    the Today queue lists exactly the cards due for the logged-in user

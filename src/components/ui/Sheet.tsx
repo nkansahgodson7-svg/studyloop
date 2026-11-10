@@ -119,7 +119,8 @@ export function SheetFrame({
   body,
   foot,
   formId,
-  onSubmit
+  onSubmit,
+  className = ""
 }: {
   title: ReactNode;
   sub?: ReactNode;
@@ -127,10 +128,11 @@ export function SheetFrame({
   foot?: ReactNode;
   formId?: string;
   onSubmit?: (data: FormData) => void;
+  className?: string;
 }) {
   const { close } = useSheet();
   return (
-    <div className="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div className={`sheet-panel ${className}`} role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
       <div className="sheet__grab" aria-hidden="true" />
       <div className="sheet__head">
         <div>

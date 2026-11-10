@@ -8,7 +8,7 @@ import { useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { SheetFrame } from "@/components/ui/Sheet";
 import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
-import ChatPanel from "@/components/notebook/ChatPanel";
+import ChatListPanel from "@/components/chat/ChatListPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
@@ -325,6 +325,16 @@ export default function NotebookScreen() {
   const [status, setStatus] = useState<LoadStatus>("loading");
   const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
 
+  useEffect(() => {
+    const value = search.get("tab");
+    if (value === "overview" || value === "chat" || value === "cards") setTab(value);
+  }, [search]);
+
+  function chooseTab(value: Tab) {
+    setTab(value);
+    router.replace(`/notebooks/${id}${value === "overview" ? "" : `?tab=${value}`}`);
+  }
+
   const reload = useCallback(
     async (_silent = false) => {
       if (!Number.isInteger(id)) {
@@ -532,7 +542,7 @@ export default function NotebookScreen() {
               role="tab"
               aria-selected={tab === value}
               className={tab === value ? "is-active" : ""}
-              onClick={() => setTab(value)}
+              onClick={() => chooseTab(value)}
             >
               {label}
             </button>
@@ -550,7 +560,11 @@ export default function NotebookScreen() {
             onDeleteSource={handleSourceDeleted}
           />
         ) : tab === "chat" ? (
-          <ChatPanel bundle={bundle} notebookId={id} />
+          <ChatListPanel
+            notebookId={id}
+            notebookTitle={bundle.title}
+            hasSources={bundle.sources.length > 0}
+          />
         ) : (
           <CardsPanelView
             bundle={bundle}
@@ -623,7 +637,7 @@ function OverviewPanelView({
 
       <div className="ai-note">
         <Icon name="sparkle" size={16} className="i-sparkle" /> Open Chat to ask across all{" "}
-        {plural(bundle.sources.length, "source")} — every answer cites its segment.
+        {plural(bundle.sources.length, "source")} — answers show which sources they used.
       </div>
     </div>
   );
