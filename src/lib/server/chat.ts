@@ -4,6 +4,7 @@ import { errorResponse, requireUser } from './auth';
 import { loadUserPlainKey } from './llmkey';
 import { listSources, searchChunks, type ChunkHit } from './ingest/ingest';
 import { ownNotebook } from './notebooks';
+import { LLM_CHAT_LIMIT, rateLimitResponse } from './ratelimit';
 
 export const CHAT_QUESTION_MAX = 1000;
 export const SEARCH_K = 5;
@@ -187,6 +188,12 @@ export async function chatStream(
     const notebook = await ownNotebook(db, user.id, notebookId);
     if (!notebook) {
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+
+    // Every turn below costs LLM tokens; gate before parsing the body.
+    const limited = await rateLimitResponse(db, `chat:${user.id}`, LLM_CHAT_LIMIT);
+    if (limited) {
+      return limited;
     }
 
     let parsedBody: unknown;

@@ -3,6 +3,7 @@ import { type } from 'arktype';
 import { NextResponse } from 'next/server';
 import { hashPassword, needsRehash, verifyPassword, verifySecret } from './crypto';
 import { clearRateLimit, clientIp, rateLimit, rateLimitStatus } from './ratelimit';
+import { isSignedSessionCookie, signSessionCookie, verifySessionCookie } from './session-cookie';
 import { MIN_PASSWORD_LENGTH } from '../password';
 import {
   createSession,
@@ -31,7 +32,7 @@ export class HttpError extends Error {
   }
 }
 
-export function readSessionToken(req: Request): string | null {
+function sessionCookieValue(req: Request): string | null {
   const header = req.headers.get('cookie');
   if (!header) return null;
   for (const part of header.split(';')) {
@@ -42,6 +43,20 @@ export function readSessionToken(req: Request): string | null {
   }
   return null;
 }
+
+/**
+ * The database token carried by the cookie. Signed cookies are verified first;
+ * a bare token (pre-upgrade cookie) is still accepted because the `sessions`
+ * lookup is what actually authorizes the request.
+ */
+export async function readSessionToken(req: Request): Promise<string | null> {
+  const value = sessionCookieValue(req);
+  if (!value) return null;
+  if (!isSignedSessionCookie(value)) return value;
+  const session = await verifySessionCookie(value);
+  return session?.token ?? null;
+}
+
 
 const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
   '/api/auth/me',
@@ -57,7 +72,7 @@ function requestPathname(req: Request): string {
 }
 
 export async function requireUser(db: Client, req: Request): Promise<SessionUser> {
-  const token = readSessionToken(req);
+  const token = await readSessionToken(req);
   const user = token ? await findUserBySession(db, token, new Date()) : null;
   if (!token || !user) {
     throw new HttpError(401, 'authentication required');
@@ -130,8 +145,31 @@ async function issueSession(db: Client, user: UserRow, status = 200): Promise<Ne
     },
     { status }
   );
-  res.cookies.set({ ...cookieBase, value: token, maxAge: SESSION_MAX_AGE });
+  await setSessionCookie(res, token, user.mustChangePassword);
   return res;
+}
+
+/**
+ * Writes the signed cookie. The signature lets middleware validate the cookie
+ * without a request to this server; the token inside stays the database key.
+ */
+async function setSessionCookie(
+  res: NextResponse,
+  token: string,
+  mustChangePassword: boolean
+): Promise<void> {
+  const signed = await signSessionCookie({
+    token,
+    expiresAt: Date.now() + SESSION_MAX_AGE * 1000,
+    mustChangePassword
+  });
+  res.cookies.set({
+    ...cookieBase,
+    // Falling back to the bare token keeps local setups without any secret
+    // working; production boot validation rejects that configuration.
+    value: signed ?? token,
+    maxAge: SESSION_MAX_AGE
+  });
 }
 
 // The account key deliberately ignores the IP: X-Forwarded-For can be forged,
@@ -192,6 +230,14 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
     // Only failures count toward the limits; a correct login resets them.
     await rateLimit(db, accountKey, { max: LOGIN_MAX_PER_ACCOUNT });
     await rateLimit(db, ipKey, { max: LOGIN_MAX_PER_IP });
+    // A disabled account gets the same answer whether or not the password was
+    // right; otherwise the response reveals password correctness.
+    if (user?.disabled) {
+      return NextResponse.json(
+        { error: 'account disabled', code: 'account_disabled' },
+        { status: 403 }
+      );
+    }
     return NextResponse.json({ error: 'invalid email or password' }, { status: 401 });
   }
   await clearRateLimit(db, accountKey);
@@ -203,7 +249,10 @@ export async function login(db: Client, req: Request): Promise<NextResponse> {
     });
   }
   if (user.disabled) {
-    return NextResponse.json({ error: 'account disabled' }, { status: 403 });
+    return NextResponse.json(
+      { error: 'account disabled', code: 'account_disabled' },
+      { status: 403 }
+    );
   }
   if (user.passwordExpiresAt && new Date(user.passwordExpiresAt) <= new Date()) {
     return NextResponse.json(
@@ -328,16 +377,22 @@ export async function changePassword(db: Client, req: Request): Promise<NextResp
   }
 
   await updateUserPassword(db, user.id, await hashPassword(body.newPassword));
-  const token = readSessionToken(req);
+  const token = await readSessionToken(req);
   if (token) {
     await revokeOtherSessionsForUser(db, user.id, token);
   }
 
-  return NextResponse.json({ ok: true, role: user.role });
+  const res = NextResponse.json({ ok: true, role: user.role });
+  if (token) {
+    // Re-sign so middleware stops forcing the change-password screen; the flag
+    // in the old cookie would otherwise outlive the requirement.
+    await setSessionCookie(res, token, false);
+  }
+  return res;
 }
 
 export async function logout(db: Client, req: Request): Promise<NextResponse> {
-  const token = readSessionToken(req);
+  const token = await readSessionToken(req);
   if (token) {
     await revokeSession(db, token);
   }
