@@ -6,6 +6,7 @@ export interface NotebookSource {
   title: string;
   url: string | null;
   meta: string;
+  pageCount?: number | null;
   createdAt: string;
 }
 
@@ -15,11 +16,21 @@ export interface NotebookCard {
   back: string;
   createdAt: string;
   generatedAt?: string | null;
+  batchId?: number | null;
+  batchCreatedAt?: string | null;
+  batchSourceSummary?: string | null;
   due: string;
   state: number;
   stability?: number;
 }
 
+export interface NotebookBatch {
+  id: number;
+  createdAt: string;
+  sourceSummary: string;
+  focus: string | null;
+  cardCount: number;
+}
 
 export interface NotebookChatMessage {
   id: number;
@@ -34,6 +45,7 @@ export interface NotebookBundle {
   title: string;
   sources: NotebookSource[];
   cards: NotebookCard[];
+  batches: NotebookBatch[];
   messages: NotebookChatMessage[];
 }
 

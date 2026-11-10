@@ -49,11 +49,11 @@ export default function AddSourceSheetContent({
       setBusy(true);
       try {
         const { extractPdfText } = await import("@/lib/pdf/extract");
-        const { text, pageCount } = await extractPdfText(await file.arrayBuffer());
+        const { pages, pageCount } = await extractPdfText(await file.arrayBuffer());
         init = {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ title: file.name, text, kind: "pdf", pageCount })
+          body: JSON.stringify({ title: file.name, pages, kind: "pdf", pageCount })
         };
       } catch {
         setBusy(false);

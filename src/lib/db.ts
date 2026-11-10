@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS source_chunks (
   id INTEGER PRIMARY KEY,
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
   ord INTEGER NOT NULL,
-  text TEXT NOT NULL
+  text TEXT NOT NULL,
+  page INTEGER
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS source_chunks_fts USING fts5(
@@ -122,10 +123,20 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS card_batches (
+  id INTEGER PRIMARY KEY,
+  notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+  source_summary TEXT NOT NULL,
+  focus TEXT,
+  card_count INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
 CREATE TABLE IF NOT EXISTS cards (
   id INTEGER PRIMARY KEY,
   notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
   source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+  batch_id INTEGER REFERENCES card_batches(id) ON DELETE SET NULL,
   front TEXT NOT NULL,
   back TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -172,6 +183,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_source ON source_chunks(source_id, ord);
 CREATE INDEX IF NOT EXISTS idx_reviews_due ON reviews(due);
 CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON quiz_attempts(user_id);
 CREATE INDEX IF NOT EXISTS idx_cards_source ON cards(source_id);
+CREATE INDEX IF NOT EXISTS idx_card_batches_notebook ON card_batches(notebook_id, created_at);
 
 CREATE TABLE IF NOT EXISTS rate_limits (
   key TEXT PRIMARY KEY,
@@ -200,6 +212,16 @@ export async function applySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute('ALTER TABLE cards ADD COLUMN generated_at TEXT');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute('ALTER TABLE cards ADD COLUMN batch_id INTEGER REFERENCES card_batches(id) ON DELETE SET NULL');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute('ALTER TABLE source_chunks ADD COLUMN page INTEGER');
   } catch {
     // column already exists
   }

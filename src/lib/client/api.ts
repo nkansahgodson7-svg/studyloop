@@ -54,6 +54,9 @@ export interface CardRow {
   id: number;
   notebookId?: number;
   sourceId?: number | null;
+  batchId?: number | null;
+  batchCreatedAt?: string | null;
+  batchSourceSummary?: string | null;
   front: string;
   back: string;
   createdAt: string;
