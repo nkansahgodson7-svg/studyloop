@@ -1,11 +1,16 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type BrowserContext } from '@playwright/test';
 
-const DEMO_COOKIE = {
-  name: 'sl_session',
-  value: 'HQM_9H8OtFAEdxNsTcl-xt8UyuHyeggJYY-SCIFXUHo',
-  domain: 'localhost',
-  path: '/'
-};
+// The demo account is seeded by `npm run seed:admin` with DEMO_PASSWORD set.
+// Override these if your local demo user uses different credentials.
+const DEMO_EMAIL = process.env.E2E_DEMO_EMAIL ?? 'demo@studyloop.app';
+const DEMO_PASSWORD = process.env.E2E_DEMO_PASSWORD ?? 'studyloop';
+
+async function signInAsDemo(context: BrowserContext): Promise<void> {
+  const res = await context.request.post('/api/auth/login', {
+    data: { email: DEMO_EMAIL, password: DEMO_PASSWORD }
+  });
+  expect(res.ok()).toBeTruthy();
+}
 
 test.describe('Desktop Layout & Page Visibility', () => {
   test('login page loads and form is centered on desktop', async ({ page }) => {
@@ -31,7 +36,7 @@ test.describe('Desktop Layout & Page Visibility', () => {
   });
 
   test('home page loads content and is not collapsed on desktop', async ({ page, context }) => {
-    await context.addCookies([DEMO_COOKIE]);
+    await signInAsDemo(context);
     await page.goto('/');
 
     const shell = page.locator('.shell');
@@ -59,7 +64,7 @@ test.describe('Desktop Layout & Page Visibility', () => {
   });
 
   test('review page loads and displays content on desktop', async ({ page, context }) => {
-    await context.addCookies([DEMO_COOKIE]);
+    await signInAsDemo(context);
     await page.goto('/review');
 
     const screen = page.locator('.screen');
@@ -69,8 +74,15 @@ test.describe('Desktop Layout & Page Visibility', () => {
   });
 
   test('notebook page loads and displays sections on desktop', async ({ page, context }) => {
-    await context.addCookies([DEMO_COOKIE]);
-    await page.goto('/notebooks/4');
+    await signInAsDemo(context);
+
+    const res = await context.request.get('/api/notebooks');
+    expect(res.ok()).toBeTruthy();
+    const notebooks = (await res.json()) as Array<{ id: number; title: string }>;
+    const organic = notebooks.find((notebook) => notebook.title === 'Organic Chemistry');
+    expect(organic).toBeTruthy();
+
+    await page.goto(`/notebooks/${organic!.id}`);
 
     const screen = page.locator('.screen');
     await expect(screen).toBeVisible();
