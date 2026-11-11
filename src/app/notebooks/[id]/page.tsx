@@ -14,6 +14,7 @@ import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet"
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 import { authRedirectFor } from "@/lib/client/api";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
+import { useSmartBack } from "@/lib/client/history";
 
 type Tab = "overview" | "chat" | "cards";
 
@@ -327,6 +328,21 @@ export default function NotebookScreen() {
   const autoOpenedSource = useRef(false);
   const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
 
+  const goBack = useSmartBack("/", (from) => {
+    if (
+      from.startsWith("/onboarding") ||
+      from.startsWith("/login") ||
+      from.startsWith("/signup") ||
+      from.startsWith("/change-password") ||
+      from.startsWith("/account-disabled")
+    ) {
+      return false;
+    }
+    // Chat is a child of this notebook, never its parent; returning there
+    // creates a notebook → chat → notebook back-button loop.
+    return !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from);
+  });
+
   useEffect(() => {
     const value = search.get("tab");
     if (value === "overview" || value === "chat" || value === "cards") setTab(value);
@@ -476,7 +492,7 @@ export default function NotebookScreen() {
     return (
       <ScreenSection>
         <div className="topbar">
-          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
             <Icon name="back" />
           </button>
           <span className="topbar__title grow">Notebook</span>
@@ -497,7 +513,7 @@ export default function NotebookScreen() {
     return (
       <ScreenSection>
         <div className="topbar">
-          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
             <Icon name="back" />
           </button>
         </div>
@@ -533,7 +549,7 @@ export default function NotebookScreen() {
   return (
     <ScreenSection>
       <div className="topbar">
-        <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+        <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
           <Icon name="back" />
         </button>
         <span className="topbar__title grow">{bundle.title}</span>

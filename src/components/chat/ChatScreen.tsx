@@ -1,12 +1,12 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/ui/icons";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useSheet } from "@/components/ui/Sheet";
 import { authRedirectFor } from "@/lib/client/api";
+import { useSmartBack } from "@/lib/client/history";
 import { loadNotebook } from "@/lib/client/notebook-data";
 import {
   ChatRequestError,
@@ -317,15 +317,19 @@ export default function ChatScreen({
   }
 
   const backHref = `/notebooks/${notebookId}?tab=chat`;
+  const goBack = useSmartBack(
+    backHref,
+    (from) => from === `/notebooks/${notebookId}` || from.startsWith(`/notebooks/${notebookId}/chat/`)
+  );
 
   if (missing) {
     return (
       <ScreenSection className="chat-screen">
         <div className="chat-head">
           <div className="chat-head__row">
-            <Link href={backHref} className="icon-btn" aria-label="Back to notebook">
+            <button className="icon-btn" type="button" onClick={goBack} aria-label="Back to notebook">
               <Icon name="back" />
-            </Link>
+            </button>
             <div className="chat-head__title">Chat</div>
           </div>
         </div>
@@ -333,9 +337,9 @@ export default function ChatScreen({
           <div className="empty">
             <p className="h3">Chat not found</p>
             <p className="small">It may have been deleted. Open the notebook to start another.</p>
-            <Link className="btn btn--primary btn--sm" href={backHref}>
+            <button className="btn btn--primary btn--sm" type="button" onClick={goBack}>
               Back to notebook
-            </Link>
+            </button>
           </div>
         </div>
       </ScreenSection>
@@ -347,9 +351,9 @@ export default function ChatScreen({
       <ScreenSection className="chat-screen">
         <div className="chat-head">
           <div className="chat-head__row">
-            <Link href={backHref} className="icon-btn" aria-label="Back to notebook">
+            <button className="icon-btn" type="button" onClick={goBack} aria-label="Back to notebook">
               <Icon name="back" />
-            </Link>
+            </button>
             <div className="chat-head__title">Chat</div>
           </div>
         </div>
@@ -388,9 +392,9 @@ export default function ChatScreen({
       <div ref={rootRef} className="chat-shell">
         <div className="chat-head">
           <div className="chat-head__row">
-            <Link href={backHref} className="icon-btn" aria-label="Back to notebook">
+            <button className="icon-btn" type="button" onClick={goBack} aria-label="Back to notebook">
               <Icon name="back" />
-            </Link>
+            </button>
             <div className="chat-head__title">{conversation.title}</div>
             <button className="icon-btn" type="button" onClick={openDrawer} aria-label="Chat history">
               <Icon name="history" />

@@ -138,6 +138,13 @@ test.describe('Onboarding', () => {
       await expect(page.locator('.sheet-root.is-open')).toBeVisible({ timeout: 20_000 });
       await expect(page.locator('.sheet-panel').getByText('Add a source')).toBeVisible();
       await expect(page.getByText('PDF', { exact: true })).toBeVisible();
+
+      // Back out of the notebook should leave onboarding behind and return to
+      // Home, not reopen the setup the user just finished.
+      await page.getByRole('button', { name: 'Close' }).click();
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
+      await expect(page).toHaveURL(/\/$/, { timeout: 30_000 });
+      await expect(page.getByRole('heading', { name: /Keep the/ })).toBeVisible();
     } finally {
       await deleteAllNotebooks(context);
       await context.request.delete('/api/me/key');

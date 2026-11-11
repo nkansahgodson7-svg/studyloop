@@ -7,6 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { Icon } from "@/components/ui/icons";
 import { meCache } from "@/lib/client/cache";
 import { authRedirectFor, getJson, type Notebook } from "@/lib/client/api";
+import { leftOnboardingHere, markOnboardingComplete } from "@/lib/client/history";
 
 const GROQ_CONSOLE_URL = "https://console.groq.com/keys";
 const MIN_KEY_LENGTH = 20;
@@ -71,6 +72,13 @@ export default function OnboardingPage() {
   const keyRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    // The user already finished setup and pressed browser back into this
+    // history entry. Send them to the app instead of showing setup again.
+    if (leftOnboardingHere()) {
+      router.replace("/");
+      return;
+    }
+
     let active = true;
 
     async function boot() {
@@ -248,9 +256,13 @@ export default function OnboardingPage() {
     }
   }
 
-  function startSource() {
-    if (!created) return;
-    router.push(`/notebooks/${created.id}?addSource=1`);
+  function leaveSetup(addSource: boolean) {
+    markOnboardingComplete();
+    if (!created) {
+      router.replace("/");
+      return;
+    }
+    router.push(`/notebooks/${created.id}${addSource ? "?addSource=1" : ""}`);
   }
 
   if (!checked) {
@@ -634,10 +646,7 @@ export default function OnboardingPage() {
                   <button
                     className="btn btn--primary btn--block"
                     type="button"
-                    onClick={() => {
-                      if (created) startSource();
-                      else router.push("/");
-                    }}
+                    onClick={() => leaveSetup(Boolean(created))}
                   >
                     {created ? (
                       <>
@@ -653,7 +662,7 @@ export default function OnboardingPage() {
                     <button
                       className="btn btn--ghost btn--sm btn--block"
                       type="button"
-                      onClick={() => router.push(`/notebooks/${created.id}`)}
+                      onClick={() => leaveSetup(false)}
                     >
                       Not now — take me to the notebook
                     </button>
