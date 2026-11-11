@@ -530,9 +530,6 @@ export default function ChatScreen({
             disabled={false}
             placeholder={quickPlaceholder}
           />
-          <p className="chat-compose__hint">
-            AI can be wrong. Check important details.
-          </p>
         </div>
       </div>
     </ScreenSection>

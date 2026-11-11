@@ -174,7 +174,7 @@ export default function MessageBubble({
           </div>
         ) : null}
         {label === "General knowledge" || label === "Sources + general" ? (
-          <p className="grounding__note">Verify with your course material.</p>
+          <p className="grounding__note" role="note">Verify with your course material.</p>
         ) : null}
         <SourcesUsed sources={message.sources} />
         {!streaming && hasText ? (

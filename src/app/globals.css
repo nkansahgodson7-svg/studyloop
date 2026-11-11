@@ -4172,9 +4172,9 @@ picture {
 }
 
 .grounding__note {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 11px;
 }
 
 .sources-used {
@@ -4562,13 +4562,6 @@ picture {
   color: var(--muted);
   font-size: 11px;
   text-align: right;
-}
-
-.chat-compose__hint {
-  margin: 5px 0 0;
-  color: var(--muted);
-  font-size: 10.5px;
-  text-align: center;
 }
 
 /* Empty state */
