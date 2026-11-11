@@ -7,18 +7,33 @@ import { join } from 'node:path';
 import { hashPassword } from './crypto';
 import { applySchema, makeLocalDb } from '@/lib/db';
 import { createNotebook } from './notebooks';
-import { createUser, createSession } from './repo';
-import { chatStream, chatMessagesGet, REFUSAL_MESSAGE, resolveLlmKey } from './chat';
+import { createSession, createUser } from './repo';
+import {
+  messageEdit,
+  messagePost,
+  messageRegenerate,
+  messageRetry,
+  resolveLlmKey,
+  type ChatDeps,
+  type PromptExcerpt
+} from './chat';
+import { createConversation, listMessages } from './conversations';
 import { ingestTextSource } from './ingest/ingest';
 
-function makeRequest(url: string, body: string, token: string | null): Request {
+function makeRequest(
+  url: string,
+  body: string | null,
+  token: string | null,
+  signal?: AbortSignal
+): Request {
   return new Request(url, {
     method: 'POST',
+    signal,
     headers: {
       'content-type': 'application/json',
       ...(token ? { cookie: `sl_session=${token}` } : {})
     },
-    body
+    body: body ?? undefined
   });
 }
 
@@ -30,17 +45,41 @@ async function readSse(res: Response): Promise<Array<Record<string, unknown>>> {
     .map((frame) => JSON.parse(frame.slice('data: '.length)) as Record<string, unknown>);
 }
 
-describe('chat()', () => {
+function iterOf(chunks: string[]): AsyncIterable<string> {
+  return (async function* () {
+    for (const chunk of chunks) yield chunk;
+  })();
+}
+
+function streamOf(chunks: string[]): ChatDeps['completeStream'] {
+  return () => iterOf(chunks);
+}
+
+describe('chat conversations', () => {
   let db: Client;
   let userId: number;
   let token: string;
   let notebookId: number;
   let foreignToken: string;
+  let chatId: number;
+
+  const searchHit = {
+    id: 11,
+    sourceId: 0,
+    ord: 0,
+    text: 'Mitochondria produce ATP through oxidative phosphorylations.',
+    page: null,
+    rank: 0.5
+  };
 
   beforeAll(async () => {
     db = makeLocalDb(join(await mkdtemp(join(tmpdir(), 'studyloop-chat-')), 'chat.db'));
     await applySchema(db);
-    const user = await createUser(db, { email: 'chat@x.local', passwordHash: await hashPassword('p'), role: 'user' });
+    const user = await createUser(db, {
+      email: 'chat@x.local',
+      passwordHash: await hashPassword('p'),
+      role: 'user'
+    });
     userId = user.id;
     token = await createSession(db, userId);
     notebookId = (await createNotebook(db, userId, 'Chat notebook')).id;
@@ -49,7 +88,12 @@ describe('chat()', () => {
       title: 'Cell Biology Notes',
       text: 'Mitochondria produce ATP through oxidative phosphorylations. The inner membrane folds are called cristae.'
     });
-    const other = await createUser(db, { email: 'other@x.local', passwordHash: await hashPassword('p'), role: 'user' });
+    chatId = (await createConversation(db, notebookId)).id;
+    const other = await createUser(db, {
+      email: 'other@x.local',
+      passwordHash: await hashPassword('p'),
+      role: 'user'
+    });
     foreignToken = await createSession(db, other.id);
   });
 
@@ -65,104 +109,268 @@ describe('chat()', () => {
     if (savedEnv !== undefined) process.env.GROQ_API_KEY = savedEnv;
   });
 
-  it('resolves the BYO key over the env default', async () => {
+  it('resolves the env default when the user has no BYO key', async () => {
     const savedEnv = process.env.GROQ_API_KEY;
     process.env.GROQ_API_KEY = 'env-default-key';
     try {
-      const envKey = await resolveLlmKey(db, userId);
-      expect(envKey).toBe('env-default-key');
+      expect(await resolveLlmKey(db, userId)).toBe('env-default-key');
     } finally {
       if (savedEnv === undefined) delete process.env.GROQ_API_KEY;
       else process.env.GROQ_API_KEY = savedEnv;
     }
   });
 
-  it('streams a grounded answer with citations and persists the turn (mocked model)', async () => {
-    const seen: { apiKey: string; system: string; question: string }[] = [];
-    const deltas = ['Mitochondria ', 'produce ATP ', 'through cristae folds.'];
-    const res = await chatStream(
+  it('streams a grounded answer, labels it, and persists the turn', async () => {
+    const sources = await db.execute({
+      sql: 'SELECT id FROM sources WHERE notebook_id = ? ORDER BY id',
+      args: [notebookId]
+    });
+    const sourceId = Number(sources.rows[0]!['id']);
+    const seen: { apiKey: string; system: string; excerpt?: PromptExcerpt }[] = [];
+    const res = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat`, JSON.stringify({ question: 'How do mitochondria produce ATP?' }), token),
-      String(notebookId),
+      makeRequest(
+        `http://x/api/chats/${chatId}/messages`,
+        JSON.stringify({ question: 'How do mitochondria produce ATP?' }),
+        token
+      ),
+      String(chatId),
       {
-        search: async (_db, _notebookId, query) => {
+        search: async (_db, _notebookId, query, k) => {
           expect(query).toBe('How do mitochondria produce ATP?');
+          expect(k).toBe(5);
           return [
-            { id: 11, sourceId: 1, ord: 0, text: 'Mitochondria produce ATP through oxidative phosphorylations.', page: null, rank: 0.5 },
-            { id: 12, sourceId: 1, ord: 1, text: 'The inner membrane folds are called cristae.', page: null, rank: 0.9 }
+            { ...searchHit, sourceId },
+            {
+              ...searchHit,
+              id: 12,
+              sourceId,
+              ord: 1,
+              text: 'The inner membrane folds are called cristae.'
+            }
           ];
         },
-        resolveLlmKey: async () => 'byo-or-default',
-        completeStream: (apiKey, system, question) => {
-          seen.push({ apiKey, system, question });
-          return deltas[Symbol.iterator]() as unknown as AsyncIterableIterator<string>;
-        }
+        resolveLlmKey: async () => 'test-key',
+        completeStream: (apiKey, system) => {
+          seen.push({ apiKey, system });
+          return (async function* () {
+            yield '[[grounding:sources]] [[used:1]]\n';
+            yield 'Mitochondria produce ATP ';
+            yield 'through cristae folds.';
+          })();
+        },
+        genTitle: async () => undefined
       }
     );
 
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('text/event-stream; charset=utf-8');
     const frames = await readSse(res);
-    const citations = frames.find((frame) => frame.type === 'citations') as { items: Array<{ n: number; sourceTitle: string }> } | undefined;
-    expect(citations?.items[0]).toMatchObject({ n: 1, sourceTitle: 'Cell Biology Notes' });
-    expect(citations?.items).toHaveLength(2);
+
+    expect(frames[0]).toMatchObject({ type: 'start' });
+    const grounding = frames.find((frame) => frame.type === 'grounding');
+    expect(grounding).toMatchObject({ label: 'sources' });
+    const usedRefs = grounding?.['sources'] as
+      | Array<{ sourceTitle: string; label: string }>
+      | undefined;
+    expect(usedRefs).toHaveLength(1);
+    expect(usedRefs?.[0]).toMatchObject({
+      sourceTitle: 'Cell Biology Notes',
+      label: 'chunk 1'
+    });
+
     const text = frames
       .filter((frame) => frame.type === 'delta')
       .map((frame) => frame.text)
       .join('');
     expect(text).toBe('Mitochondria produce ATP through cristae folds.');
-    const done = frames.find((frame) => frame.type === 'done');
-    expect(done).toBeDefined();
+    // The control line must never leak into the visible answer.
+    expect(text).not.toContain('[[grounding');
+    expect(frames.some((frame) => frame.type === 'done')).toBe(true);
 
     expect(seen).toHaveLength(1);
-    expect(seen[0]!.apiKey).toBe('byo-or-default');
-    expect(seen[0]!.question).toBe('How do mitochondria produce ATP?');
+    expect(seen[0]!.apiKey).toBe('test-key');
     expect(seen[0]!.system).toContain('cristae');
 
-    const turn = await db.execute({
-      sql: 'SELECT role, content, citations FROM chat_messages WHERE notebook_id = ? ORDER BY id',
-      args: [notebookId]
+    const page = await listMessages(db, chatId);
+    expect(page.messages).toHaveLength(2);
+    expect(page.messages[0]).toMatchObject({
+      role: 'user',
+      content: 'How do mitochondria produce ATP?'
     });
-    expect(turn.rows).toHaveLength(2);
-    expect(turn.rows[0]).toMatchObject({ role: 'user', content: 'How do mitochondria produce ATP?' });
-    expect(turn.rows[1]).toMatchObject({ role: 'assistant', content: 'Mitochondria produce ATP through cristae folds.' });
-    expect(JSON.parse(String(turn.rows[1]!.citations))).toHaveLength(2);
+    expect(page.messages[1]).toMatchObject({
+      role: 'assistant',
+      grounding: 'sources',
+      status: 'complete'
+    });
+    expect(page.messages[1]!.sources).toHaveLength(1);
   });
 
-  it('answers with the deterministic refusal and never calls the model when retrieval is empty', async () => {
-    let modelCalled = false;
-    const emptyNotebook = (await createNotebook(db, userId, 'Empty notebook')).id;
-    const res = await chatStream(
+  it('sends the previous turns as context', async () => {
+    let seenMessages: Array<{ role: string; content: string }> = [];
+    const res = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${emptyNotebook}/chat`, JSON.stringify({ question: 'What is quantum chromodynamics?' }), token),
-      String(emptyNotebook),
+      makeRequest(`http://x/api/chats/${chatId}/messages`, JSON.stringify({ question: 'And the folds?' }), token),
+      String(chatId),
       {
         search: async () => [],
-        resolveLlmKey: async () => 'some-key',
-        completeStream: () => {
-          modelCalled = true;
-          return [] as unknown as AsyncIterableIterator<string>;
-        }
+        resolveLlmKey: async () => 'test-key',        completeStream: (_apiKey, _system, messages) => {
+          seenMessages = messages;
+          return iterOf(['[[grounding:general]] [[used:]]\n', 'They are cristae.']);
+        },
+        genTitle: async () => undefined
       }
     );
-    expect(modelCalled).toBe(false);
+    await readSse(res);
+    expect(seenMessages.length).toBe(3);
+    expect(seenMessages[0]!.role).toBe('user');
+    expect(seenMessages[0]!.content).toContain('How do mitochondria produce ATP?');
+    expect(seenMessages[1]!.role).toBe('assistant');
+    expect(seenMessages[2]).toMatchObject({ role: 'user', content: 'And the folds?' });
+  });
+
+  it('answers from general knowledge with an explicit label', async () => {
+    const emptyChat = (await createConversation(db, notebookId)).id;
+    const res = await messagePost(
+      db,
+      makeRequest(
+        `http://x/api/chats/${emptyChat}/messages`,
+        JSON.stringify({ question: 'What is a derivative?' }),
+        token
+      ),
+      String(emptyChat),
+      {
+        search: async () => [],
+        resolveLlmKey: async () => 'test-key',
+        completeStream: streamOf(['[[grounding:general]] [[used:]]\n', 'A rate of change.']),
+        genTitle: async () => undefined
+      }
+    );
     const frames = await readSse(res);
-    const text = frames.filter((frame) => frame.type === 'delta').map((frame) => frame.text).join('');
-    expect(text).toBe(REFUSAL_MESSAGE);
-    expect(frames.some((frame) => frame.type === 'citations')).toBe(false);
-    const turn = await db.execute({
-      sql: "SELECT role, content, citations FROM chat_messages WHERE notebook_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1",
-      args: [emptyNotebook]
+    expect(frames.find((frame) => frame.type === 'grounding')).toMatchObject({
+      label: 'general',
+      sources: []
     });
-    expect(turn.rows[0]).toMatchObject({ role: 'assistant', content: REFUSAL_MESSAGE });
-    expect(String(turn.rows[0]!.citations)).toBe('[]');
+    const page = await listMessages(db, emptyChat);
+    expect(page.messages[1]).toMatchObject({
+      role: 'assistant',
+      content: 'A rate of change.',
+      grounding: 'general',
+      sources: []
+    });
+  });
+
+  it('stores a partial answer as stopped when the client aborts', async () => {
+    const abortChat = (await createConversation(db, notebookId)).id;
+    const controller = new AbortController();
+    const res = await messagePost(
+      db,
+      makeRequest(
+        `http://x/api/chats/${abortChat}/messages`,
+        JSON.stringify({ question: 'Explain ATP synthase' }),
+        token,
+        controller.signal
+      ),
+      String(abortChat),
+      {
+        search: async () => [],
+        resolveLlmKey: async () => 'test-key',
+        completeStream: () =>
+          (async function* () {
+            yield '[[grounding:general]] [[used:]]\n';
+            yield 'ATP synthase spins ';
+            controller.abort();
+            yield 'and never arrives.';
+          })(),
+        genTitle: async () => undefined
+      }
+    );
+    await readSse(res);
+    const page = await listMessages(db, abortChat);
+    expect(page.messages).toHaveLength(2);
+    expect(page.messages[1]).toMatchObject({
+      role: 'assistant',
+      content: 'ATP synthase spins ',
+      status: 'stopped'
+    });
+  });
+
+  it('regenerates an answer in place and drops older turns', async () => {
+    const target = (await listMessages(db, chatId)).messages.at(-1)!;
+    expect(target.role).toBe('assistant');
+    const res = await messageRegenerate(
+      db,
+      makeRequest(`http://x/api/chats/${chatId}/messages/${target.id}/regenerate`, null, token),
+      String(chatId),
+      String(target.id),
+      {
+        search: async () => [],
+        resolveLlmKey: async () => 'test-key',
+        completeStream: streamOf(['[[grounding:general]] [[used:]]\n', 'A fresher answer.']),
+        genTitle: async () => undefined
+      }
+    );
+    expect(res.status).toBe(200);
+    await readSse(res);
+    const page = await listMessages(db, chatId);
+    const answers = page.messages.filter((message) => message.role === 'assistant');
+    expect(answers).toHaveLength(2);
+    expect(answers.at(-1)!.content).toBe('A fresher answer.');
+    expect(page.messages.some((message) => message.id === target.id)).toBe(false);
+  });
+
+  it('edits a question, replaces what followed, and re-answers', async () => {
+    const firstUser = (await listMessages(db, chatId)).messages.find((m) => m.role === 'user')!;
+    const res = await messageEdit(
+      db,
+      makeRequest(
+        `http://x/api/chats/${chatId}/messages/${firstUser.id}/edit`,
+        JSON.stringify({ question: 'Where is ATP made?' }),
+        token
+      ),
+      String(chatId),
+      String(firstUser.id),
+      {
+        search: async () => [],
+        resolveLlmKey: async () => 'test-key',
+        completeStream: streamOf(['[[grounding:general]] [[used:]]\n', 'In the mitochondria.']),
+        genTitle: async () => undefined
+      }
+    );
+    expect(res.status).toBe(200);
+    await readSse(res);
+    const page = await listMessages(db, chatId);
+    expect(page.messages).toHaveLength(2);
+    expect(page.messages[0]).toMatchObject({ role: 'user', content: 'Where is ATP made?' });
+    expect(page.messages[1]).toMatchObject({ role: 'assistant', content: 'In the mitochondria.' });
+  });
+
+  it('retries a question that previously failed', async () => {
+    const firstUser = (await listMessages(db, chatId)).messages[0]!;
+    const res = await messageRetry(
+      db,
+      makeRequest(`http://x/api/chats/${chatId}/messages/${firstUser.id}/retry`, null, token),
+      String(chatId),
+      String(firstUser.id),
+      {
+        search: async () => [],
+        resolveLlmKey: async () => 'test-key',
+        completeStream: streamOf(['[[grounding:general]] [[used:]]\n', 'Second try.']),
+        genTitle: async () => undefined
+      }
+    );
+    expect(res.status).toBe(200);
+    await readSse(res);
+    const page = await listMessages(db, chatId);
+    expect(page.messages).toHaveLength(2);
+    expect(page.messages[1]).toMatchObject({ role: 'assistant', content: 'Second try.' });
   });
 
   it('answers 503 with a clear setup message when no key is configured', async () => {
-    const res = await chatStream(
+    const res = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat`, JSON.stringify({ question: 'hello?' }), token),
-      String(notebookId),
+      makeRequest(`http://x/api/chats/${chatId}/messages`, JSON.stringify({ question: 'hello?' }), token),
+      String(chatId),
       { resolveLlmKey: async () => null }
     );
     expect(res.status).toBe(503);
@@ -171,54 +379,36 @@ describe('chat()', () => {
   });
 
   it('answers 400 for a blank or oversized question', async () => {
-    const blank = await chatStream(
+    const blank = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat`, JSON.stringify({ question: '   ' }), token),
-      String(notebookId)
+      makeRequest(`http://x/api/chats/${chatId}/messages`, JSON.stringify({ question: '   ' }), token),
+      String(chatId)
     );
     expect(blank.status).toBe(400);
-    const long = await chatStream(
+    const long = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat`, JSON.stringify({ question: 'x'.repeat(1001) }), token),
-      String(notebookId)
+      makeRequest(
+        `http://x/api/chats/${chatId}/messages`,
+        JSON.stringify({ question: 'x'.repeat(2001) }),
+        token
+      ),
+      String(chatId)
     );
     expect(long.status).toBe(400);
   });
 
-  it('answers 404 for a foreign notebook', async () => {
-    const res = await chatStream(
+  it('answers 404 for foreign or unknown chats', async () => {
+    const foreign = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat`, JSON.stringify({ question: 'hello?' }), foreignToken),
-      String(notebookId)
+      makeRequest(`http://x/api/chats/${chatId}/messages`, JSON.stringify({ question: 'hi' }), foreignToken),
+      String(chatId)
     );
-    expect(res.status).toBe(404);
-  });
-
-  it('lists history ascending with parsed citations for the owner', async () => {
-    await db.execute({
-      sql: "INSERT INTO chat_messages (notebook_id, role, content, citations) VALUES (?, 'user', 'first question', '[]'), (?, 'assistant', 'first answer', ?)",
-      args: [notebookId, notebookId, JSON.stringify([{ n: 1, sourceId: 1, ord: 0, sourceTitle: 'Cell Biology Notes' }])]
-    });
-    const res = await chatMessagesGet(
+    expect(foreign.status).toBe(404);
+    const unknown = await messagePost(
       db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat/messages`, '', token),
-      String(notebookId)
+      makeRequest('http://x/api/chats/999999/messages', JSON.stringify({ question: 'hi' }), token),
+      '999999'
     );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { messages: Array<{ role: string; content: string; citations: unknown[] }> };
-    expect(body.messages.length).toBeGreaterThanOrEqual(2);
-    const contents = body.messages.map((message) => message.content);
-    expect(contents.indexOf('first question')).toBeLessThan(contents.indexOf('first answer'));
-    const cited = body.messages.find((message) => message.content === 'first answer');
-    expect(cited?.citations[0]).toMatchObject({ n: 1, sourceTitle: 'Cell Biology Notes' });
-  });
-
-  it('answers 404 for history of a foreign notebook', async () => {
-    const res = await chatMessagesGet(
-      db,
-      makeRequest(`http://x/api/notebooks/${notebookId}/chat/messages`, '', foreignToken),
-      String(notebookId)
-    );
-    expect(res.status).toBe(404);
+    expect(unknown.status).toBe(404);
   });
 });

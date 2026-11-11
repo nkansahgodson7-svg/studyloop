@@ -26,6 +26,7 @@
     "@libsql/client": "^0.15.0",
     "@vercel/analytics": "^2.0.1",
     "arktype": "^2.1.0",
+    "katex": "^0.19.1",
     "next": "^15.3.0",
     "pdfjs-dist": "^6.4.299",
     "react": "^19.1.0",

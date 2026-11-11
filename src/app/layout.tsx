@@ -41,6 +41,12 @@ export const viewport: Viewport = {
   interactiveWidget: 'resizes-content'
 };
 
+// Analytics only exists on Vercel: the production script is served from
+// /_vercel/insights and the dev debug script from va.vercel-scripts.com. Loading
+// it anywhere else (plain `next dev` / `next start`) logs a CSP violation or a
+// 404 on every page, which looks like the app itself is broken.
+const analyticsEnabled = Boolean(process.env.VERCEL);
+
 export default function RootLayout({
   children
 }: Readonly<{ children: React.ReactNode }>) {
@@ -50,7 +56,7 @@ export default function RootLayout({
         <div className="frame" aria-hidden="true" />
         <AppShell>{children}</AppShell>
         <ServiceWorkerRegister />
-        <Analytics />
+        {analyticsEnabled ? <Analytics /> : null}
       </body>
     </html>
   );

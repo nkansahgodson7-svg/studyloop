@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { directionFor, titleFor, type NavDirection } from "@/lib/navigation";
+import { rememberRoute } from "@/lib/client/history";
 import { TabBar } from "@/components/ui/TabBar";
 import { ToastProvider } from "@/components/ui/Toast";
 import { SheetProvider } from "@/components/ui/Sheet";
@@ -65,6 +66,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     const timer = setTimeout(() => setExit(null), EXIT_DURATION[exit.dir]);
     return () => clearTimeout(timer);
   }, [exit]);
+
+  useEffect(() => {
+    rememberRoute(pathname);
+  }, [pathname]);
 
   useEffect(() => {
     document.title = `${titleFor(pathname)} — StudyLoop`;

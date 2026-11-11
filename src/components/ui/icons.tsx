@@ -33,7 +33,12 @@ export const ICON_PATHS = {
   dots: '<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
   arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
   layers:
-    '<path d="M12 3.5 21 8l-9 4.5L3 8z"/><path d="M3 12.5 12 17l9-4.5M3 16.5 12 21l9-4.5"/>'
+    '<path d="M12 3.5 21 8l-9 4.5L3 8z"/><path d="M3 12.5 12 17l9-4.5M3 16.5 12 21l9-4.5"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M15 9V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h3"/>',
+  stop: '<rect x="6.5" y="6.5" width="11" height="11" rx="2"/>',
+  edit: '<path d="M5 19h4l9.5-9.5a2.1 2.1 0 0 0-3-3L6 16v3z"/><path d="M14 7l3 3"/>',
+  history:
+    '<path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M12 8v4l3 2"/>'
 } as const;
 
 export type IconName = keyof typeof ICON_PATHS;

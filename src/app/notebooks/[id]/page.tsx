@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { Icon, TONES, plural } from "@/components/ui/icons";
@@ -8,12 +8,13 @@ import { useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { SheetFrame } from "@/components/ui/Sheet";
 import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
-import ChatPanel from "@/components/notebook/ChatPanel";
+import ChatListPanel from "@/components/chat/ChatListPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 import { authRedirectFor } from "@/lib/client/api";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
+import { useSmartBack } from "@/lib/client/history";
 
 type Tab = "overview" | "chat" | "cards";
 
@@ -323,7 +324,34 @@ export default function NotebookScreen() {
   const id = Number(params.id);
   const [bundle, setBundle] = useState<NotebookBundle | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
+  const requestedAddSource = useRef(search.get("addSource") === "1");
+  const autoOpenedSource = useRef(false);
   const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
+
+  const goBack = useSmartBack("/", (from) => {
+    if (
+      from.startsWith("/onboarding") ||
+      from.startsWith("/login") ||
+      from.startsWith("/signup") ||
+      from.startsWith("/change-password") ||
+      from.startsWith("/account-disabled")
+    ) {
+      return false;
+    }
+    // Chat is a child of this notebook, never its parent; returning there
+    // creates a notebook → chat → notebook back-button loop.
+    return !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from);
+  });
+
+  useEffect(() => {
+    const value = search.get("tab");
+    if (value === "overview" || value === "chat" || value === "cards") setTab(value);
+  }, [search]);
+
+  function chooseTab(value: Tab) {
+    setTab(value);
+    router.replace(`/notebooks/${id}${value === "overview" ? "" : `?tab=${value}`}`);
+  }
 
   const reload = useCallback(
     async (_silent = false) => {
@@ -372,6 +400,26 @@ export default function NotebookScreen() {
       void reload(true);
     }} />);
   }
+
+  // Onboarding lands here with ?addSource=1 so the first notebook opens directly
+  // into the add-source sheet. Strip it before the bundle finishes loading so a
+  // refresh cannot reopen the sheet, then open it once there is a title to show.
+  useEffect(() => {
+    if (!requestedAddSource.current) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("addSource");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!requestedAddSource.current || autoOpenedSource.current || !bundle) return;
+    autoOpenedSource.current = true;
+    openAddSource();
+  }, [bundle, openAddSource]);
 
   function openMenu() {
     if (!bundle) return;
@@ -444,7 +492,7 @@ export default function NotebookScreen() {
     return (
       <ScreenSection>
         <div className="topbar">
-          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
             <Icon name="back" />
           </button>
           <span className="topbar__title grow">Notebook</span>
@@ -465,7 +513,7 @@ export default function NotebookScreen() {
     return (
       <ScreenSection>
         <div className="topbar">
-          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
             <Icon name="back" />
           </button>
         </div>
@@ -501,7 +549,7 @@ export default function NotebookScreen() {
   return (
     <ScreenSection>
       <div className="topbar">
-        <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+        <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
           <Icon name="back" />
         </button>
         <span className="topbar__title grow">{bundle.title}</span>
@@ -532,7 +580,7 @@ export default function NotebookScreen() {
               role="tab"
               aria-selected={tab === value}
               className={tab === value ? "is-active" : ""}
-              onClick={() => setTab(value)}
+              onClick={() => chooseTab(value)}
             >
               {label}
             </button>
@@ -550,7 +598,11 @@ export default function NotebookScreen() {
             onDeleteSource={handleSourceDeleted}
           />
         ) : tab === "chat" ? (
-          <ChatPanel bundle={bundle} notebookId={id} />
+          <ChatListPanel
+            notebookId={id}
+            notebookTitle={bundle.title}
+            hasSources={bundle.sources.length > 0}
+          />
         ) : (
           <CardsPanelView
             bundle={bundle}
@@ -623,7 +675,7 @@ function OverviewPanelView({
 
       <div className="ai-note">
         <Icon name="sparkle" size={16} className="i-sparkle" /> Open Chat to ask across all{" "}
-        {plural(bundle.sources.length, "source")} — every answer cites its segment.
+        {plural(bundle.sources.length, "source")} — answers show which sources they used.
       </div>
     </div>
   );

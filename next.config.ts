@@ -1,17 +1,25 @@
 import type { NextConfig } from 'next';
 
 const isDev = process.env.NODE_ENV !== 'production';
+// `vercel dev` serves the analytics debug script from va.vercel-scripts.com;
+// Vercel deployments also report Web Vitals to vitals.vercel-insights.com.
+// Off Vercel the Analytics component is not rendered at all.
+const onVercel = Boolean(process.env.VERCEL);
 
 // Next's App Router emits inline bootstrap scripts, so script-src needs
 // 'unsafe-inline' unless nonces are wired through middleware. Everything else
 // is locked to same-origin (fonts are self-hosted via @fontsource-variable).
 const csp = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}`,
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ''}${
+    onVercel ? ' https://va.vercel-scripts.com' : ''
+  }`,
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self'",
   "img-src 'self' data: blob:",
-  "connect-src 'self'",
+  `connect-src 'self'${
+    onVercel ? ' https://va.vercel-scripts.com https://vitals.vercel-insights.com' : ''
+  }`,
   "worker-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'self'",

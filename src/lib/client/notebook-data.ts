@@ -32,27 +32,12 @@ export interface NotebookBatch {
   cardCount: number;
 }
 
-export interface NotebookChatMessage {
-  id: number;
-  role: "user" | "assistant";
-  content: string;
-  citations: Array<{ n: number; sourceId: number; ord: number; sourceTitle: string }>;
-  createdAt: string;
-}
-
 export interface NotebookBundle {
   id: number;
   title: string;
   sources: NotebookSource[];
   cards: NotebookCard[];
   batches: NotebookBatch[];
-  messages: NotebookChatMessage[];
-}
-
-export interface ChatFrame {
-  type: "citations" | "delta" | "done";
-  text?: string;
-  items?: NotebookChatMessage["citations"];
 }
 
 export async function loadNotebook(id: number): Promise<NotebookBundle> {
