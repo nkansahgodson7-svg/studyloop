@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { Icon, TONES, plural } from "@/components/ui/icons";
@@ -323,6 +323,8 @@ export default function NotebookScreen() {
   const id = Number(params.id);
   const [bundle, setBundle] = useState<NotebookBundle | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
+  const requestedAddSource = useRef(search.get("addSource") === "1");
+  const autoOpenedSource = useRef(false);
   const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
 
   useEffect(() => {
@@ -382,6 +384,26 @@ export default function NotebookScreen() {
       void reload(true);
     }} />);
   }
+
+  // Onboarding lands here with ?addSource=1 so the first notebook opens directly
+  // into the add-source sheet. Strip it before the bundle finishes loading so a
+  // refresh cannot reopen the sheet, then open it once there is a title to show.
+  useEffect(() => {
+    if (!requestedAddSource.current) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("addSource");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!requestedAddSource.current || autoOpenedSource.current || !bundle) return;
+    autoOpenedSource.current = true;
+    openAddSource();
+  }, [bundle, openAddSource]);
 
   function openMenu() {
     if (!bundle) return;
