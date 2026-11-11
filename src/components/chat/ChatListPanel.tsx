@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/icons";
 import { authRedirectFor } from "@/lib/client/api";
+import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import {
   createConversation,
   loadConversations,
@@ -63,7 +64,9 @@ export default function ChatListPanel({
     setError(null);
     try {
       const conversation = await createConversation(notebookId);
-      router.push(`/notebooks/${notebookId}/chat/${conversation.id}`);
+      const href = `/notebooks/${notebookId}/chat/${conversation.id}`;
+      startOptimisticNav(href);
+      router.push(href);
     } catch (err) {
       const redirect = authRedirectFor(err);
       if (redirect) {
@@ -127,7 +130,11 @@ export default function ChatListPanel({
               key={conversation.id}
               type="button"
               className="row chat-row"
-              onClick={() => router.push(`/notebooks/${notebookId}/chat/${conversation.id}`)}
+              onClick={() => {
+                const href = `/notebooks/${notebookId}/chat/${conversation.id}`;
+                startOptimisticNav(href);
+                router.push(href);
+              }}
             >
               <span className="row__tile tone-lilac">
                 <Icon name="sparkle" size={18} className="i-sparkle" />

@@ -2131,6 +2131,90 @@ picture {
   background: var(--brand);
 }
 
+.tabbar__item:active {
+  transform: scale(0.96);
+}
+
+.tabbar__item.is-pending svg {
+  animation: tabPending 0.9s var(--ease-out) infinite;
+}
+
+@keyframes tabPending {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* In-flight route change: an indeterminate bar pinned to the shell top. */
+.nav-progress {
+  position: absolute;
+  top: env(safe-area-inset-top);
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 60;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s linear;
+}
+
+.nav-progress.is-active {
+  opacity: 1;
+}
+
+.nav-progress__bar {
+  display: block;
+  width: 38%;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--brand);
+  transform: translate3d(-110%, 0, 0);
+}
+
+.nav-progress.is-active .nav-progress__bar {
+  animation: navProgressSweep 1.15s var(--ease-out) infinite;
+}
+
+@keyframes navProgressSweep {
+  from {
+    transform: translate3d(-110%, 0, 0);
+  }
+  to {
+    transform: translate3d(320%, 0, 0);
+  }
+}
+
+/* Destination skeleton shown when a route change outlasts the ghost delay.
+   It sits above the outgoing screen and absorbs taps (inert blocks its own
+   controls) so a tap cannot hit a hidden link from the previous page; the tab
+   bar stays above it at z-index 40. */
+.screen--ghost {
+  z-index: 5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-progress.is-active .nav-progress__bar {
+    animation: none;
+    width: 100%;
+    transform: none;
+    opacity: 0.5;
+  }
+
+  .tabbar__item.is-pending svg {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .tabbar__item:active {
+    transform: none;
+  }
+}
+
 .toasts {
   position: absolute;
   left: 0;

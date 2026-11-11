@@ -10,6 +10,7 @@ import { SheetFrame } from "@/components/ui/Sheet";
 import { Icon, initialsOf } from "@/components/ui/icons";
 import { clearSessionCaches, meCache, summaryCache, notebookViewsCache } from "@/lib/client/cache";
 import { authRedirectFor } from "@/lib/client/api";
+import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import { DEMO_EMAIL } from "@/lib/client/demo";
 
 export default function SettingsPage() {
@@ -120,7 +121,14 @@ export default function SettingsPage() {
           <div className="section-head" style={{ marginBottom: 2 }}>
             <h2>Account</h2>
           </div>
-          <button className="setting-row" type="button" onClick={() => router.push("/change-password")}>
+          <button
+            className="setting-row"
+            type="button"
+            onClick={() => {
+              startOptimisticNav("/change-password");
+              router.push("/change-password");
+            }}
+          >
             <span className="setting-row__icon">
               <Icon name="key" size={18} />
             </span>
@@ -158,7 +166,14 @@ export default function SettingsPage() {
             <div className="section-head" style={{ marginBottom: 2 }}>
               <h2>Admin</h2>
             </div>
-            <button className="setting-row" type="button" onClick={() => router.push("/admin")}>
+            <button
+              className="setting-row"
+              type="button"
+              onClick={() => {
+                startOptimisticNav("/admin");
+                router.push("/admin");
+              }}
+            >
               <span className="setting-row__icon">
                 <Icon name="layers" size={18} />
               </span>

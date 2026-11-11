@@ -6,6 +6,7 @@ import { Icon } from "@/components/ui/icons";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useSheet } from "@/components/ui/Sheet";
 import { authRedirectFor } from "@/lib/client/api";
+import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import { useSmartBack } from "@/lib/client/history";
 import { loadNotebook } from "@/lib/client/notebook-data";
 import {
@@ -310,7 +311,11 @@ export default function ChatScreen({
       <ChatDrawer
         notebookId={notebookId}
         currentId={conversation.id}
-        onOpen={(id) => router.push(`/notebooks/${notebookId}/chat/${id}`)}
+        onOpen={(id) => {
+          const href = `/notebooks/${notebookId}/chat/${id}`;
+          startOptimisticNav(href);
+          router.push(href);
+        }}
         onDeleted={() => router.replace(`/notebooks/${notebookId}?tab=chat`)}
       />
     );

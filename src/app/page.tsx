@@ -11,6 +11,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useNotebookList } from "@/lib/client/useNotebooks";
 import { meCache, summaryCache } from "@/lib/client/cache";
 import { authRedirectFor } from "@/lib/client/api";
+import { optimisticLinkClick } from "@/lib/client/optimistic-nav";
 
 function nameFromEmail(email: string): string {
   const prefix = email.split("@")[0] || "learner";
@@ -141,7 +142,12 @@ export default function HomePage() {
                 const { notebook } = view;
                 const tone = TONES[notebook.id % TONES.length];
                 return (
-                  <Link key={notebook.id} className="row" href={`/notebooks/${notebook.id}`}>
+                  <Link
+                    key={notebook.id}
+                    className="row"
+                    href={`/notebooks/${notebook.id}`}
+                    onClick={optimisticLinkClick(`/notebooks/${notebook.id}`)}
+                  >
                     <span className={`row__tile ${tone}`} aria-hidden="true">
                       {(notebook.title.charAt(0) || "N").toUpperCase()}
                     </span>
