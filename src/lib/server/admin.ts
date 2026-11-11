@@ -282,7 +282,9 @@ export async function computeAdminStats(db: Client): Promise<AdminStats> {
     }),
     db.execute({
       sql: `SELECT (SELECT COUNT(*) FROM review_log) AS reviews,
-                   (SELECT COUNT(*) FROM chat_messages WHERE role = 'user') AS chat_prompts,
+                   (SELECT COUNT(*) FROM chat_messages m
+                     JOIN chat_conversations c ON c.id = m.conversation_id
+                     WHERE m.role = 'user') AS chat_prompts,
                    (SELECT COUNT(*) FROM reviews WHERE due <= ?) AS due_now`,
       args: [now]
     }),
@@ -304,7 +306,9 @@ export async function computeAdminStats(db: Client): Promise<AdminStats> {
                     JOIN notebooks nb ON nb.id = c.notebook_id
                   UNION ALL
                   SELECT nb.user_id AS uid, m.created_at AS ts
-                    FROM chat_messages m JOIN notebooks nb ON nb.id = m.notebook_id
+                    FROM chat_messages m
+                    JOIN chat_conversations c ON c.id = m.conversation_id
+                    JOIN notebooks nb ON nb.id = c.notebook_id
                    WHERE m.role = 'user'
                   UNION ALL
                   SELECT se.user_id AS uid, se.created_at AS ts

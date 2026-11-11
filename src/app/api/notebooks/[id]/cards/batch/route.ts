@@ -1,5 +1,5 @@
 import { getDb } from '@/lib/db';
-import { chatStream } from '@/lib/server/chat';
+import { cardsBatchAdd } from '@/lib/server/cards';
 
 export const POST = async (req: Request, ctx: { params: Promise<{ id: string }> }) =>
-  chatStream(getDb(), req, (await ctx.params).id);
+  cardsBatchAdd(getDb(), req, (await ctx.params).id);

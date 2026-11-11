@@ -19,6 +19,7 @@ import {
   signup
 } from './auth';
 import { rateLimit, resetRateLimits } from './ratelimit';
+import { isSignedSessionCookie } from './session-cookie';
 import { seedAdmin } from './seed-admin';
 
 const PASSWORD = 'correct horse battery staple';
@@ -172,10 +173,12 @@ describe('login route', () => {
     expect(cookie?.sameSite).toBe('lax');
     expect(cookie?.maxAge).toBeGreaterThan(0);
 
-    // The issued session must actually resolve through the data layer.
+    // The issued cookie is signed; the token inside must resolve through the
+    // data layer, and a request carrying it must authenticate.
     const issued = cookie!.value;
-    const rows = await db.execute({ sql: 'SELECT user_id FROM sessions WHERE token = ?', args: [issued] });
-    expect(rows.rows.length).toBe(1);
+    expect(isSignedSessionCookie(issued)).toBe(true);
+    const resolved = await requireUser(db, await requestWithCookie('http://x/api/auth/me', issued));
+    expect(resolved.email).toBe('login.user@test.local');
   });
 
   it('rejects a wrong password with 401', async () => {
@@ -191,6 +194,13 @@ describe('login route', () => {
   it('rejects a disabled account with 403', async () => {
     const res = await login(db, loginRequest('login.disabled@test.local', PASSWORD));
     expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'account_disabled' });
+  });
+
+  it('does not reveal whether a disabled account password was correct', async () => {
+    const res = await login(db, loginRequest('login.disabled@test.local', 'wrong-password'));
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: 'account_disabled' });
   });
 
   it('locks an account after repeated failures, even when the client IP is rotated', async () => {
@@ -427,11 +437,8 @@ describe('signup route', () => {
     expect(cookie?.sameSite).toBe('lax');
     expect(cookie?.maxAge).toBeGreaterThan(0);
 
-    const sessions = await db.execute({
-      sql: 'SELECT user_id FROM sessions WHERE token = ?',
-      args: [cookie!.value]
-    });
-    expect(sessions.rows.length).toBe(1);
+    const resolved = await requireUser(db, await requestWithCookie('http://x/api/auth/me', cookie!.value));
+    expect(resolved.email).toBe('new.user@test.local');
   });
 
   it('forces the user role even when the body asks for admin', async () => {

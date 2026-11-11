@@ -16,3 +16,6 @@ playwright-report/
 *.tsbuildinfo
 next-env.d.ts
 .vercel
+
+# Vendored upstream clone, not part of this project
+freellmapi/

@@ -6,6 +6,7 @@ export interface NotebookSource {
   title: string;
   url: string | null;
   meta: string;
+  pageCount?: number | null;
   createdAt: string;
 }
 
@@ -15,18 +16,20 @@ export interface NotebookCard {
   back: string;
   createdAt: string;
   generatedAt?: string | null;
+  batchId?: number | null;
+  batchCreatedAt?: string | null;
+  batchSourceSummary?: string | null;
   due: string;
   state: number;
   stability?: number;
 }
 
-
-export interface NotebookChatMessage {
+export interface NotebookBatch {
   id: number;
-  role: "user" | "assistant";
-  content: string;
-  citations: Array<{ n: number; sourceId: number; ord: number; sourceTitle: string }>;
   createdAt: string;
+  sourceSummary: string;
+  focus: string | null;
+  cardCount: number;
 }
 
 export interface NotebookBundle {
@@ -34,13 +37,7 @@ export interface NotebookBundle {
   title: string;
   sources: NotebookSource[];
   cards: NotebookCard[];
-  messages: NotebookChatMessage[];
-}
-
-export interface ChatFrame {
-  type: "citations" | "delta" | "done";
-  text?: string;
-  items?: NotebookChatMessage["citations"];
+  batches: NotebookBatch[];
 }
 
 export async function loadNotebook(id: number): Promise<NotebookBundle> {

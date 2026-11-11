@@ -1,10 +1,18 @@
 import type { Client } from '@libsql/client';
+import { NextResponse } from 'next/server';
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 // Expired rows are purged on roughly 1 in 50 writes so the table stays small
 // without needing a cron job.
 const PURGE_PROBABILITY = 0.02;
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Per-user budgets for the routes that call a paid LLM or write many rows. */
+export const LLM_CHAT_LIMIT = { max: 150, windowMs: HOUR_MS };
+export const LLM_GENERATE_LIMIT = { max: 30, windowMs: HOUR_MS };
+export const INGEST_LIMIT = { max: 20, windowMs: HOUR_MS };
+export const YOUTUBE_INGEST_LIMIT = { max: 10, windowMs: HOUR_MS };
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -80,6 +88,28 @@ export async function rateLimit(
     return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((bucketResetAt - now) / 1000)) };
   }
   return { allowed: true, retryAfterSeconds: 0 };
+}
+
+/**
+ * Counts one attempt and returns a ready 429 response when the budget for
+ * `key` is spent, or null when the request may proceed. Used by the expensive
+ * routes (LLM calls, source ingest) that need a cheap early gate.
+ */
+export async function rateLimitResponse(
+  db: Client,
+  key: string,
+  options: RateLimitOptions = {}
+): Promise<NextResponse | null> {
+  const result = await rateLimit(db, key, options);
+  if (result.allowed) {
+    return null;
+  }
+  const res = NextResponse.json(
+    { error: 'too many requests — try again later' },
+    { status: 429 }
+  );
+  res.headers.set('retry-after', String(result.retryAfterSeconds));
+  return res;
 }
 
 /** Read-only check: does not count as an attempt. */

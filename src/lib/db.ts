@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS source_chunks (
   id INTEGER PRIMARY KEY,
   source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
   ord INTEGER NOT NULL,
-  text TEXT NOT NULL
+  text TEXT NOT NULL,
+  page INTEGER
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS source_chunks_fts USING fts5(
@@ -113,12 +114,37 @@ CREATE TRIGGER IF NOT EXISTS source_chunks_ad AFTER DELETE ON source_chunks BEGI
   VALUES ('delete', old.id, old.text);
 END;
 
-CREATE TABLE IF NOT EXISTS chat_messages (
+CREATE TABLE IF NOT EXISTS chat_conversations (
   id INTEGER PRIMARY KEY,
   notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  title_source TEXT NOT NULL DEFAULT 'auto' CHECK (title_source IN ('auto', 'user', 'fallback')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id INTEGER PRIMARY KEY,
+  conversation_id INTEGER NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
   role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
   content TEXT NOT NULL,
-  citations TEXT NOT NULL DEFAULT '[]',
+  grounding TEXT CHECK (grounding IN ('sources', 'general', 'mixed')),
+  sources TEXT NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'stopped', 'error')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS schema_meta (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS card_batches (
+  id INTEGER PRIMARY KEY,
+  notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+  source_summary TEXT NOT NULL,
+  focus TEXT,
+  card_count INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -126,6 +152,7 @@ CREATE TABLE IF NOT EXISTS cards (
   id INTEGER PRIMARY KEY,
   notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
   source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+  batch_id INTEGER REFERENCES card_batches(id) ON DELETE SET NULL,
   front TEXT NOT NULL,
   back TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -163,7 +190,7 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
 );
 
 CREATE INDEX IF NOT EXISTS idx_sources_notebook ON sources(notebook_id);
-CREATE INDEX IF NOT EXISTS idx_chat_notebook ON chat_messages(notebook_id, id);
+CREATE INDEX IF NOT EXISTS idx_chat_conversations_notebook ON chat_conversations(notebook_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cards_notebook ON cards(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_quiz_notebook ON quiz_items(notebook_id);
@@ -172,6 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_chunks_source ON source_chunks(source_id, ord);
 CREATE INDEX IF NOT EXISTS idx_reviews_due ON reviews(due);
 CREATE INDEX IF NOT EXISTS idx_quiz_attempts_user ON quiz_attempts(user_id);
 CREATE INDEX IF NOT EXISTS idx_cards_source ON cards(source_id);
+CREATE INDEX IF NOT EXISTS idx_card_batches_notebook ON card_batches(notebook_id, created_at);
 
 CREATE TABLE IF NOT EXISTS rate_limits (
   key TEXT PRIMARY KEY,
@@ -190,8 +218,51 @@ CREATE TABLE IF NOT EXISTS review_log (
 CREATE INDEX IF NOT EXISTS idx_review_log_card ON review_log(card_id, graded_at);
 `;
 
+const CHAT_REBUILD_KEY = 'chat_overhaul_v1';
+
+/**
+ * Chat moved from one implicit thread per notebook to conversations. The
+ * product decision was a clean start, so on the first run after this schema
+ * lands the old rows are dropped (the table shape changes too). Guarded by a
+ * marker so later runs never touch real conversations.
+ */
+async function rebuildChatTablesOnce(db: Client): Promise<void> {
+  const marker = await db.execute({
+    sql: 'SELECT value FROM schema_meta WHERE key = ?',
+    args: [CHAT_REBUILD_KEY]
+  });
+  if (marker.rows.length > 0) {
+    return;
+  }
+  await db.executeMultiple(`
+    DROP INDEX IF EXISTS idx_chat_notebook;
+    DROP TABLE IF EXISTS chat_messages;
+    CREATE TABLE chat_messages (
+      id INTEGER PRIMARY KEY,
+      conversation_id INTEGER NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+      role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      grounding TEXT CHECK (grounding IN ('sources', 'general', 'mixed')),
+      sources TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'stopped', 'error')),
+      created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, id);
+  `);
+  await db.execute({
+    sql: 'INSERT INTO schema_meta (key, value) VALUES (?, ?)',
+    args: [CHAT_REBUILD_KEY, new Date().toISOString()]
+  });
+}
+
 export async function applySchema(db: Client): Promise<void> {
   await db.executeMultiple(SCHEMA);
+  await rebuildChatTablesOnce(db);
+  // Created after the rebuild: on legacy databases the old chat_messages table
+  // has no conversation_id column, so this index cannot be part of SCHEMA.
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, id)'
+  );
   // Column added after table creation: pre-existing databases get it best-effort.
   try {
     await db.execute('ALTER TABLE reviews ADD COLUMN fsrs_meta TEXT');
@@ -200,6 +271,16 @@ export async function applySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute('ALTER TABLE cards ADD COLUMN generated_at TEXT');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute('ALTER TABLE cards ADD COLUMN batch_id INTEGER REFERENCES card_batches(id) ON DELETE SET NULL');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute('ALTER TABLE source_chunks ADD COLUMN page INTEGER');
   } catch {
     // column already exists
   }

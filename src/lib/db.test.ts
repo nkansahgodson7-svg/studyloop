@@ -57,6 +57,53 @@ describe('db: schema + FTS', () => {
     };
   }
 
+  it('rebuilds legacy chat tables once and keeps new conversations on later runs', async () => {
+    const db = makeLocalDb(join(dir, 'legacy-chat.db'));
+    await db.executeMultiple(`
+      CREATE TABLE chat_messages (
+        id INTEGER PRIMARY KEY,
+        notebook_id INTEGER,
+        role TEXT,
+        content TEXT,
+        citations TEXT,
+        created_at TEXT
+      );
+      INSERT INTO chat_messages (notebook_id, role, content, citations)
+      VALUES (1, 'user', 'old history', '[]');
+    `);
+
+    await applySchema(db);
+
+    const columns = await db.execute('PRAGMA table_info(chat_messages)');
+    const names = columns.rows.map((row) => String(row['name']));
+    expect(names).toContain('conversation_id');
+    expect(names).not.toContain('notebook_id');
+    const leftover = await db.execute('SELECT COUNT(*) AS n FROM chat_messages');
+    expect(Number(leftover.rows[0]!['n'])).toBe(0);
+
+    const user = await db.execute({
+      sql: "INSERT INTO users (email, pw_hash, role) VALUES ('legacy@test.local', 'h', 'user')"
+    });
+    const notebook = await db.execute({
+      sql: 'INSERT INTO notebooks (user_id, title) VALUES (?, ?)',
+      args: [user.lastInsertRowid!, 'Kept']
+    });
+    const conversation = await db.execute({
+      sql: 'INSERT INTO chat_conversations (notebook_id, title) VALUES (?, ?)',
+      args: [notebook.lastInsertRowid!, 'Kept chat']
+    });
+    await db.execute({
+      sql: "INSERT INTO chat_messages (conversation_id, role, content) VALUES (?, 'user', 'new history')",
+      args: [conversation.lastInsertRowid!]
+    });
+
+    await applySchema(db); // the marker prevents a second wipe
+
+    const kept = await db.execute('SELECT content FROM chat_messages');
+    expect(kept.rows.map((row) => row['content'])).toEqual(['new history']);
+    await db.close();
+  });
+
   it('full-text search returns the chunk matching the query', async () => {
     const { db, source } = await seedNotebookWithChunk('fts-hit');
     const c = await db.execute({
@@ -97,6 +144,35 @@ describe('db: schema + FTS', () => {
     expect(columns.rows.map((row) => row.name)).toEqual(
       expect.arrayContaining(['must_change_password', 'password_expires_at'])
     );
+    await db.close();
+  });
+
+  it('applySchema upgrades legacy cards and chunks with batch/page columns', async () => {
+    const db = makeLocalDb(join(dir, 'legacy-cards.db'));
+    await db.execute(`CREATE TABLE source_chunks (
+      id INTEGER PRIMARY KEY,
+      source_id INTEGER NOT NULL,
+      ord INTEGER NOT NULL,
+      text TEXT NOT NULL
+    )`);
+    await db.execute(`CREATE TABLE cards (
+      id INTEGER PRIMARY KEY,
+      notebook_id INTEGER NOT NULL,
+      source_id INTEGER,
+      front TEXT NOT NULL,
+      back TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    )`);
+
+    await applySchema(db);
+    await applySchema(db);
+
+    const cardColumns = await db.execute('PRAGMA table_info(cards)');
+    expect(cardColumns.rows.map((row) => row.name)).toEqual(
+      expect.arrayContaining(['generated_at', 'batch_id'])
+    );
+    const chunkColumns = await db.execute('PRAGMA table_info(source_chunks)');
+    expect(chunkColumns.rows.map((row) => row.name)).toContain('page');
     await db.close();
   });
 

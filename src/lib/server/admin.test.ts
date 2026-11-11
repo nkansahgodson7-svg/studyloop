@@ -369,9 +369,13 @@ describe('admin stats', () => {
       args: [cardId, new Date(Date.now() - 60_000).toISOString()]
     });
     await db.execute({ sql: 'INSERT INTO review_log (card_id, rating) VALUES (?, 3)', args: [cardId] });
-    await db.execute({
-      sql: "INSERT INTO chat_messages (notebook_id, role, content) VALUES (?, 'user', 'hello')",
+    const conversation = await db.execute({
+      sql: "INSERT INTO chat_conversations (notebook_id, title) VALUES (?, 'Hello')",
       args: [notebookId]
+    });
+    await db.execute({
+      sql: "INSERT INTO chat_messages (conversation_id, role, content) VALUES (?, 'user', 'hello')",
+      args: [Number(conversation.lastInsertRowid)]
     });
   });
 
@@ -487,7 +491,8 @@ describe('admin delete user', () => {
     const cardId = Number(card.lastInsertRowid);
     await db.execute({ sql: 'INSERT INTO reviews (card_id, due) VALUES (?, ?)', args: [cardId, new Date().toISOString()] });
     await db.execute({ sql: 'INSERT INTO review_log (card_id, rating) VALUES (?, 3)', args: [cardId] });
-    await db.execute({ sql: 'INSERT INTO chat_messages (notebook_id, role, content) VALUES (?, ?, ?)', args: [notebookId, 'user', 'hi'] });
+    const conversation = await db.execute({ sql: "INSERT INTO chat_conversations (notebook_id, title) VALUES (?, 'Hi')", args: [notebookId] });
+    await db.execute({ sql: 'INSERT INTO chat_messages (conversation_id, role, content) VALUES (?, ?, ?)', args: [Number(conversation.lastInsertRowid), 'user', 'hi'] });
     await db.execute({ sql: 'INSERT INTO source_chunks (source_id, ord, text) VALUES (?, 0, ?)', args: [Number(source.lastInsertRowid), 'body'] });
   });
 
@@ -500,7 +505,7 @@ describe('admin delete user', () => {
     expect(res.status).toBe(200);
     const userCount = await db.execute({ sql: 'SELECT COUNT(*) n FROM users WHERE id = ?', args: [targetId] });
     expect(Number(userCount.rows[0]!.n)).toBe(0);
-    for (const table of ['notebooks', 'sources', 'source_chunks', 'cards', 'reviews', 'review_log', 'chat_messages']) {
+    for (const table of ['notebooks', 'sources', 'source_chunks', 'cards', 'reviews', 'review_log', 'chat_messages', 'chat_conversations']) {
       const count = await db.execute(`SELECT COUNT(*) n FROM ${table}`);
       expect(Number(count.rows[0]!.n)).toBe(0);
     }

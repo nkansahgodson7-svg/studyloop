@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { Icon, TONES, plural } from "@/components/ui/icons";
@@ -8,12 +8,13 @@ import { useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { SheetFrame } from "@/components/ui/Sheet";
 import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
-import ChatPanel from "@/components/notebook/ChatPanel";
+import ChatListPanel from "@/components/chat/ChatListPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 import { authRedirectFor } from "@/lib/client/api";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
+import { useSmartBack } from "@/lib/client/history";
 
 type Tab = "overview" | "chat" | "cards";
 
@@ -162,20 +163,96 @@ function CardRowView({ card }: { card: NotebookCard }) {
   );
 }
 
+function sameCalendarDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function relativeBatchDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (sameCalendarDay(date, now)) return `Today · ${time}`;
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  if (sameCalendarDay(date, yesterday)) return `Yesterday · ${time}`;
+  const options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  if (date.getFullYear() !== now.getFullYear()) options.year = "numeric";
+  return `${date.toLocaleDateString([], options)} · ${time}`;
+}
+
+function BatchGroup({
+  title,
+  sub,
+  focus,
+  count,
+  onPractice,
+  children
+}: {
+  title: string;
+  sub: string;
+  focus?: string | null;
+  count: number;
+  onPractice?: () => void;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <section className={`batch-group${open ? " is-open" : ""}`}>
+      <div className="batch-group__head">
+        <button
+          className="batch-group__toggle"
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="batch-group__chevron" aria-hidden="true">
+            <Icon name="chevron" size={16} />
+          </span>
+          <span className="batch-group__meta">
+            <span className="batch-group__date">{title}</span>
+            <span className="batch-group__summary">{sub}</span>
+            {focus ? <span className="batch-group__focus">Focus: {focus}</span> : null}
+          </span>
+          <span className="badge badge--neutral">{plural(count, "card")}</span>
+        </button>
+        {onPractice ? (
+          <button className="btn btn--sm btn--secondary" type="button" onClick={onPractice}>
+            Practice
+          </button>
+        ) : null}
+      </div>
+      {open ? <div className="batch-group__cards">{children}</div> : null}
+    </section>
+  );
+}
+
 function CardsPanelView({
   bundle,
-  generating,
   onReview,
   onPractice,
+  onPracticeBatch,
   onGenerate
 }: {
   bundle: NotebookBundle;
-  generating: boolean;
   onReview: () => void;
   onPractice: () => void;
+  onPracticeBatch: (batchId: number) => void;
   onGenerate: () => void;
 }) {
   const due = dueCount(bundle.cards);
+  const batches = (bundle.batches ?? [])
+    .map((batch) => ({
+      batch,
+      cards: bundle.cards.filter((card) => card.batchId === batch.id)
+    }))
+    .filter((group) => group.cards.length > 0);
+  const manual = bundle.cards.filter((card) => card.batchId == null && !card.generatedAt);
+  const legacy = bundle.cards.filter((card) => card.batchId == null && Boolean(card.generatedAt));
 
   return (
     <div className="stack--16">
@@ -183,46 +260,52 @@ function CardsPanelView({
         <h2>Flashcards</h2>
         <span className="badge badge--neutral">{plural(bundle.cards.length, "card")}</span>
       </div>
-      <button className="btn btn--ai btn--block" type="button" disabled={generating} onClick={onGenerate}>
-        <Icon name="sparkle" size={17} className="i-sparkle" /> {generating ? "Reading sources…" : "Generate from sources"}
+      <button className="btn btn--ai btn--block" type="button" onClick={onGenerate}>
+        <Icon name="sparkle" size={17} className="i-sparkle" /> Generate from sources
       </button>
-      {generating ? (
-        <div className="processing">
-          <div className="processing__row">
-            <span className="spinner" /> Scanning {plural(bundle.sources.length, "source")} and drafting cards…
-          </div>
-          <div className="skeleton" style={{ height: 68 }} />
-          <div className="skeleton" style={{ height: 68 }} />
-          <div className="skeleton" style={{ height: 68 }} />
-        </div>
-      ) : null}
-      {!generating && bundle.cards.length === 0 ? (
+      {bundle.cards.length === 0 ? (
         <div className="empty">
           <p className="h3">No cards yet</p>
           <p className="small">Generate a first set from your sources, then review them daily.</p>
         </div>
-      ) : null}
-      {!generating && bundle.cards.length > 0 ? (
-        <div className="stack--8">
-          {(() => {
-            const study = bundle.cards.filter((card) => !card.generatedAt);
-            const generated = bundle.cards.filter((card) => card.generatedAt);
-            const groups: Array<{ label: string; items: typeof study }> = [];
-            if (study.length) groups.push({ label: `Study cards · ${study.length}`, items: study });
-            if (generated.length) groups.push({ label: `Generated · ${generated.length}`, items: generated });
-            return groups.map((group) => (
-              <div className="stack--8" key={group.label}>
-                <h3 className="h4" style={{ marginTop: 6 }}>
-                  {group.label}
-                </h3>
-                {group.items.map((card) => (
+      ) : (
+        <div className="stack--16">
+          {batches.map(({ batch, cards }) => (
+            <BatchGroup
+              key={batch.id}
+              title={relativeBatchDate(batch.createdAt)}
+              sub={batch.sourceSummary}
+              focus={batch.focus}
+              count={cards.length}
+              onPractice={() => onPracticeBatch(batch.id)}
+            >
+              <div className="stack--8">
+                {cards.map((card) => (
                   <CardRowView key={card.id} card={card} />
                 ))}
               </div>
-            ));
-          })()}
+            </BatchGroup>
+          ))}
+          {manual.length > 0 ? (
+            <BatchGroup title="Manual" sub="Cards you added by hand" count={manual.length}>
+              <div className="stack--8">
+                {manual.map((card) => (
+                  <CardRowView key={card.id} card={card} />
+                ))}
+              </div>
+            </BatchGroup>
+          ) : null}
+          {legacy.length > 0 ? (
+            <BatchGroup title="Generated" sub="Older generated cards" count={legacy.length}>
+              <div className="stack--8">
+                {legacy.map((card) => (
+                  <CardRowView key={card.id} card={card} />
+                ))}
+              </div>
+            </BatchGroup>
+          ) : null}
         </div>
-      ) : null}
+      )}
       <div style={{ position: "sticky", bottom: "calc(12px + env(safe-area-inset-bottom))", paddingTop: 6 }}>
         <button className="btn btn--primary btn--block" type="button" onClick={due ? onReview : onPractice}>
           {due ? `Review ${plural(due, "card")}` : "Practice all cards"}
@@ -241,8 +324,34 @@ export default function NotebookScreen() {
   const id = Number(params.id);
   const [bundle, setBundle] = useState<NotebookBundle | null>(null);
   const [status, setStatus] = useState<LoadStatus>("loading");
+  const requestedAddSource = useRef(search.get("addSource") === "1");
+  const autoOpenedSource = useRef(false);
   const [tab, setTab] = useState<Tab>((search.get("tab") as Tab) || "overview");
-  const [generating, setGenerating] = useState(false);
+
+  const goBack = useSmartBack("/", (from) => {
+    if (
+      from.startsWith("/onboarding") ||
+      from.startsWith("/login") ||
+      from.startsWith("/signup") ||
+      from.startsWith("/change-password") ||
+      from.startsWith("/account-disabled")
+    ) {
+      return false;
+    }
+    // Chat is a child of this notebook, never its parent; returning there
+    // creates a notebook → chat → notebook back-button loop.
+    return !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from);
+  });
+
+  useEffect(() => {
+    const value = search.get("tab");
+    if (value === "overview" || value === "chat" || value === "cards") setTab(value);
+  }, [search]);
+
+  function chooseTab(value: Tab) {
+    setTab(value);
+    router.replace(`/notebooks/${id}${value === "overview" ? "" : `?tab=${value}`}`);
+  }
 
   const reload = useCallback(
     async (_silent = false) => {
@@ -292,6 +401,26 @@ export default function NotebookScreen() {
     }} />);
   }
 
+  // Onboarding lands here with ?addSource=1 so the first notebook opens directly
+  // into the add-source sheet. Strip it before the bundle finishes loading so a
+  // refresh cannot reopen the sheet, then open it once there is a title to show.
+  useEffect(() => {
+    if (!requestedAddSource.current) return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("addSource");
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${url.pathname}${url.search}${url.hash}`
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!requestedAddSource.current || autoOpenedSource.current || !bundle) return;
+    autoOpenedSource.current = true;
+    openAddSource();
+  }, [bundle, openAddSource]);
+
   function openMenu() {
     if (!bundle) return;
     sheet.open(
@@ -338,63 +467,32 @@ export default function NotebookScreen() {
   }
 
   function handleGenerate() {
-    if (generating) return;
     if (!bundle) return;
     if (bundle.sources.length === 0) {
-      toast("No new cards in these sources");
+      toast("Add a source first");
       return;
     }
     sheet.open(
       <GenerateCardsSheetContent
+        notebookId={id}
         sources={bundle.sources}
-        onConfirm={(sourceIds) => {
-          setGenerating(true);
+        onCommitted={(count) => {
           sheet.close();
           setTab("cards");
-          void runGeneration(sourceIds);
+          toast(`${count} ${count === 1 ? "card" : "cards"} added`);
+          void notebookViewsCache.load({ force: true }).catch(() => undefined);
+          summaryCache.invalidate();
+          void reload(true);
         }}
       />
     );
-  }
-
-  async function runGeneration(sourceIds: number[]) {
-    setGenerating(true);
-    try {
-      let createdTotal = 0;
-      let lastError = "";
-      for (const sourceId of sourceIds) {
-        const res = await fetch(`/api/notebooks/${id}/cards/generate`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ sourceId })
-        });
-        const body = (await res.json().catch(() => null)) as { error?: string; created?: number } | null;
-        if (res.ok && typeof body?.created === "number") {
-          createdTotal += body.created;
-        } else if (body?.error) {
-          lastError = body.error;
-        }
-      }
-      if (createdTotal === 0) {
-        toast(lastError || "No new cards in these sources");
-      } else {
-        void notebookViewsCache.load({ force: true }).catch(() => undefined);
-        summaryCache.invalidate();
-        await reload(true);
-        toast("Cards generated");
-      }
-    } catch {
-      toast("Cards could not be generated");
-    } finally {
-      setGenerating(false);
-    }
   }
 
   if (status === "loading") {
     return (
       <ScreenSection>
         <div className="topbar">
-          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
             <Icon name="back" />
           </button>
           <span className="topbar__title grow">Notebook</span>
@@ -415,7 +513,7 @@ export default function NotebookScreen() {
     return (
       <ScreenSection>
         <div className="topbar">
-          <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+          <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
             <Icon name="back" />
           </button>
         </div>
@@ -451,7 +549,7 @@ export default function NotebookScreen() {
   return (
     <ScreenSection>
       <div className="topbar">
-        <button className="icon-btn" type="button" onClick={() => router.back()} aria-label="Back">
+        <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
           <Icon name="back" />
         </button>
         <span className="topbar__title grow">{bundle.title}</span>
@@ -482,7 +580,7 @@ export default function NotebookScreen() {
               role="tab"
               aria-selected={tab === value}
               className={tab === value ? "is-active" : ""}
-              onClick={() => setTab(value)}
+              onClick={() => chooseTab(value)}
             >
               {label}
             </button>
@@ -500,13 +598,17 @@ export default function NotebookScreen() {
             onDeleteSource={handleSourceDeleted}
           />
         ) : tab === "chat" ? (
-          <ChatPanel bundle={bundle} notebookId={id} />
+          <ChatListPanel
+            notebookId={id}
+            notebookTitle={bundle.title}
+            hasSources={bundle.sources.length > 0}
+          />
         ) : (
           <CardsPanelView
             bundle={bundle}
-            generating={generating}
             onReview={startReview}
             onPractice={() => router.push(`/review/session?notebook=${id}&practice=1`)}
+            onPracticeBatch={(batchId) => router.push(`/review/session?notebook=${id}&batch=${batchId}`)}
             onGenerate={handleGenerate}
           />
         )}
@@ -573,7 +675,7 @@ function OverviewPanelView({
 
       <div className="ai-note">
         <Icon name="sparkle" size={16} className="i-sparkle" /> Open Chat to ask across all{" "}
-        {plural(bundle.sources.length, "source")} — every answer cites its segment.
+        {plural(bundle.sources.length, "source")} — answers show which sources they used.
       </div>
     </div>
   );
