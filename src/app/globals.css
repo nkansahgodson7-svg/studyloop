@@ -272,8 +272,16 @@ picture {
   padding-inline: 20px;
 }
 
-.stack {
+.stack,
+.stack--6,
+.stack--8,
+.stack--16,
+.stack--20,
+.stack--24 {
   display: grid;
+}
+
+.stack {
   gap: 12px;
 }
 
@@ -3927,16 +3935,19 @@ picture {
   display: flex;
   flex: 1;
   flex-direction: column;
-  min-height: 100%;
+  /* No `min-height: 100%`: it would cap the shell at viewport height, giving
+     the sticky header a containing block that ends after one screen. */
 }
 
+/* Top app bar: 40dp icon buttons, title-medium (16sp) title, 11sp notebook
+   name — roughly a 56dp bar instead of the old ~86dp one. */
 .chat-head {
   position: sticky;
   top: 0;
   z-index: 6;
   display: grid;
-  gap: 2px;
-  padding: calc(10px + env(safe-area-inset-top)) 14px 10px;
+  gap: 0;
+  padding: calc(4px + env(safe-area-inset-top)) 8px 6px;
   border-bottom: 1px solid var(--line);
   background: rgba(245, 241, 232, 0.94);
   backdrop-filter: blur(10px);
@@ -3945,8 +3956,14 @@ picture {
 .chat-head__row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 44px;
+  gap: 2px;
+  min-height: 40px;
+}
+
+.chat-head .icon-btn {
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
 }
 
 .chat-head__title {
@@ -3954,18 +3971,19 @@ picture {
   min-width: 0;
   overflow: hidden;
   font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 550;
+  font-size: 16px;
+  font-weight: 560;
   letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chat-head__sub {
-  margin: 0 0 0 48px;
+  margin: 0 0 2px 42px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11.5px;
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -3974,11 +3992,11 @@ picture {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
   width: 100%;
   max-width: 780px;
   margin: 0 auto;
-  padding: 20px 16px 10px;
+  padding: 16px 16px 8px;
 }
 
 .chat-thread__end {
@@ -3992,10 +4010,13 @@ picture {
   text-align: center;
 }
 
+/* Message surfaces follow the Material 3 baseline grid: 4dp spacing unit,
+   16dp container radius with a 4dp tail, body-medium type (14sp / 20sp). */
+
 .chat-turn {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .chat-turn--user {
@@ -4004,20 +4025,21 @@ picture {
 
 .msg {
   max-width: 100%;
+  padding: 0;
 }
 
 .msg--user {
   position: relative;
-  max-width: 86%;
-  padding: 11px 14px;
-  border-radius: 20px 20px 6px 20px;
+  max-width: 80%;
+  padding: 8px 12px;
+  border-radius: 16px 16px 4px 16px;
   background: var(--ink);
   color: #fbf7ec;
 }
 
 .msg--user p {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -4025,15 +4047,17 @@ picture {
 
 .msg--ai {
   width: 100%;
+  padding: 12px 14px 8px;
+  border-radius: 16px 16px 16px 4px;
 }
 
 .msg__label {
   display: flex;
   align-items: center;
-  gap: 5px;
-  margin-bottom: 7px;
+  gap: 4px;
+  margin-bottom: 4px;
   color: var(--brand);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 650;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -4051,30 +4075,41 @@ picture {
 }
 
 .msg__body {
-  padding: 2px 0 6px;
+  padding: 0;
 }
 
 .msg__actions {
   display: flex;
   align-items: center;
-  gap: 2px;
-  margin-top: 6px;
-  min-height: 28px;
+  gap: 0;
+  margin-top: 2px;
+  min-height: 24px;
   opacity: 1;
   transition: opacity 0.16s;
 }
 
-.msg--user .msg__actions {
+/* The question's own actions sit under the bubble, not inside it, so a short
+   "Yoo" stays a one-line pill instead of a two-row box. */
+.chat-turn--user .msg__actions {
   justify-content: flex-end;
-  margin: 6px -4px -6px 0;
-  opacity: 0.72;
+  margin: 0 2px 0 0;
+  min-height: 0;
+  opacity: 0.75;
+}
+
+.chat-turn--user .msg__actions button {
+  color: var(--muted);
+}
+
+.chat-turn--user .msg__actions button:hover {
+  background: var(--surface-2);
 }
 
 .msg__actions button {
   display: inline-grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 0;
   border-radius: var(--r-pill);
@@ -4114,13 +4149,13 @@ picture {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
-  padding: 4px 9px;
+  margin-top: 6px;
+  padding: 3px 8px;
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   background: var(--surface);
   color: var(--muted);
-  font-size: 11.5px;
+  font-size: 11px;
   line-height: 1.3;
 }
 

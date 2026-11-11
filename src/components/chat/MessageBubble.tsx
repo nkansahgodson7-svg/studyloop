@@ -121,19 +121,19 @@ export default function MessageBubble({
           ) : (
             <p>{message.content}</p>
           )}
-          {!editing ? (
-            <div className="msg__actions">
-              <button type="button" onClick={copy} aria-label="Copy question">
-                <Icon name={copied ? "check" : "copy"} size={14} />
-              </button>
-              {onEdit ? (
-                <button type="button" onClick={() => setEditing(true)} aria-label="Edit question">
-                  <Icon name="edit" size={14} />
-                </button>
-              ) : null}
-            </div>
-          ) : null}
         </div>
+        {!editing ? (
+          <div className="msg__actions">
+            <button type="button" onClick={copy} aria-label="Copy question">
+              <Icon name={copied ? "check" : "copy"} size={14} />
+            </button>
+            {onEdit ? (
+              <button type="button" onClick={() => setEditing(true)} aria-label="Edit question">
+                <Icon name="edit" size={14} />
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {error ? (
           <div className="chat-error" role="alert">
             <Icon name="alert" size={14} />
