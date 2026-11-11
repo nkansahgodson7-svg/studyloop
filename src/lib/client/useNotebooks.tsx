@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { authRedirectFor, getJson } from "./api";
+import { startOptimisticNav } from "./optimistic-nav";
 import { notebookViewsCache } from "./cache";
 
 export function useNotebookList() {
@@ -65,7 +66,9 @@ export function useNotebookList() {
         ]);
         closeSheet();
         toast("Notebook created");
-        router.push(`/notebooks/${notebook.id}`);
+        const href = `/notebooks/${notebook.id}`;
+        startOptimisticNav(href);
+        router.push(href);
         return null;
       } catch (error) {
         const status = (error as { status?: number }).status;

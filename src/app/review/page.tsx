@@ -5,6 +5,7 @@ import { ScreenSection } from "@/components/ui/ScreenSection";
 import { RowSkeletonList, Skeleton } from "@/components/ui/Skeleton";
 import { Icon, TONES, plural } from "@/components/ui/icons";
 import { useNotebookList } from "@/lib/client/useNotebooks";
+import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 
 const GRADE_HINT = "Grades follow Again 10m, Hard 1d, Good 3d, Easy 7d.";
 
@@ -17,7 +18,9 @@ export default function ReviewPage() {
   const scheduled = Math.max(0, total - due);
 
   function startReview(notebookId: number) {
-    router.push(`/review/session?notebook=${notebookId}`);
+    const href = `/review/session?notebook=${notebookId}`;
+    startOptimisticNav(href);
+    router.push(href);
   }
 
   return (
