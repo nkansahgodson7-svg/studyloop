@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import katex from "katex";
+import "katex/dist/katex.min.css";
 import { Icon } from "@/components/ui/icons";
 
 type Block =
@@ -8,14 +10,71 @@ type Block =
   | { type: "h"; level: number; text: string }
   | { type: "ul"; items: string[] }
   | { type: "ol"; items: string[] }
-  | { type: "code"; lang: string; code: string };
+  | { type: "code"; lang: string; code: string }
+  | { type: "math"; tex: string }
+  | { type: "table"; align: Align[]; head: string[]; rows: string[][] };
+
+type Align = "left" | "center" | "right" | null;
+
+/** The model sometimes repeats its control line mid-answer; never show it. */
+function stripControlMarkers(text: string): string {
+  return text
+    .replace(/\[\s*\[\s*grounding\s*:[^\]]*\]\s*\]/gi, "")
+    .replace(/\[\s*\[\s*used\s*:[^\]]*\]\s*\]/gi, "");
+}
+
+function renderTex(tex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(tex, {
+      displayMode,
+      throwOnError: false,
+      strict: false,
+      trust: false,
+      output: "html"
+    });
+  } catch {
+    return tex;
+  }
+}
+
+function MathSpan({ tex, display }: { tex: string; display: boolean }) {
+  return (
+    <span
+      className={display ? "md-math md-math--display" : "md-math"}
+      // KaTeX escapes its input and runs with `trust: false`, so this cannot
+      // inject markup from model output.
+      dangerouslySetInnerHTML={{ __html: renderTex(tex, display) }}
+    />
+  );
+}
+
+// Ordered so `**bold**` wins over `*em*`, code wins over everything, and maths
+// is captured before emphasis so `_`/`*` inside TeX are left untouched.
+const INLINE_RE =
+  /(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|_[^_\n]+_|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\]|\$\$[\s\S]*?\$\$|\$(?!\s)[^$\n]*?[^\s$]\$)/g;
 
 function inline(text: string, keyPrefix: string): ReactNode[] {
-  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*\n]+\*|_[^_\n]+_|`[^`]+`)/g);
+  const parts = text.split(INLINE_RE);
   return parts.map((part, index) => {
+    if (part.length === 0) return null;
     const key = `${keyPrefix}-${index}`;
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return <code key={key}>{part.slice(1, -1)}</code>;
+    }
     if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
-      return <strong key={key}>{part.slice(2, -2)}</strong>;
+      return <strong key={key}>{inline(part.slice(2, -2), `${key}-b`)}</strong>;
+    }
+    if (part.startsWith("\\(") && part.endsWith("\\)") && part.length > 4) {
+      return <MathSpan key={key} tex={part.slice(2, -2)} display={false} />;
+    }
+    if (part.startsWith("\\[") && part.endsWith("\\]") && part.length > 4) {
+      return <MathSpan key={key} tex={part.slice(2, -2)} display />;
+    }
+    if (part.startsWith("$$") && part.endsWith("$$") && part.length > 4) {
+      return <MathSpan key={key} tex={part.slice(2, -2)} display />;
+    }
+    if (part.startsWith("$") && part.endsWith("$") && part.length > 2) {
+      return <MathSpan key={key} tex={part.slice(1, -1)} display={false} />;
     }
     if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
       return <em key={key}>{part.slice(1, -1)}</em>;
@@ -23,22 +82,87 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
     if (part.startsWith("_") && part.endsWith("_") && part.length > 2) {
       return <em key={key}>{part.slice(1, -1)}</em>;
     }
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
-      return <code key={key}>{part.slice(1, -1)}</code>;
-    }
     return part;
   });
 }
 
+const TABLE_SEPARATOR = /^\s*\|?\s*:?-{1,}:?\s*(?:\|\s*:?-{1,}:?\s*)+\|?\s*$/;
+
+function splitRow(row: string): string[] {
+  const text = row.trim();
+  const cells: string[] = [];
+  let current = "";
+  let closing = "";
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]!;
+    const next = text[i + 1];
+
+    if (closing) {
+      // Inside maths, a pipe belongs to the expression (e.g. `\|v\|`).
+      if (char === "\\" && (next === closing || next === "\\")) {
+        current += char + next;
+        if (next === closing) closing = "";
+        i += 1;
+      } else if (char === closing) {
+        current += char;
+        closing = "";
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === "\\" && (next === "(" || next === "[")) {
+      closing = next === "(" ? ")" : "]";
+      current += char + next;
+      i += 1;
+      continue;
+    }
+    if (char === "$") {
+      closing = "$";
+      current += char;
+      continue;
+    }
+    if (char === "\\" && next === "|") {
+      current += "|";
+      i += 1;
+      continue;
+    }
+    if (char === "|") {
+      cells.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  cells.push(current.trim());
+
+  if (cells.length > 1 && cells[0] === "" && text.startsWith("|")) cells.shift();
+  if (cells.length > 1 && cells[cells.length - 1] === "" && text.endsWith("|")) cells.pop();
+  return cells;
+}
+
+function parseAlign(cell: string): Align {
+  const trimmed = cell.trim();
+  const left = trimmed.startsWith(":");
+  const right = trimmed.endsWith(":");
+  if (left && right) return "center";
+  if (right) return "right";
+  if (left) return "left";
+  return null;
+}
+
 function parse(text: string): Block[] {
-  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const lines = stripControlMarkers(text).replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
   let index = 0;
 
   while (index < lines.length) {
     const line = lines[index] ?? "";
+    const trimmed = line.trim();
 
-    const fence = /^```([\w-]*)\s*$/.exec(line.trim());
+    const fence = /^```([\w-]*)\s*$/.exec(trimmed);
     if (fence) {
       const code: string[] = [];
       index += 1;
@@ -51,7 +175,56 @@ function parse(text: string): Block[] {
       continue;
     }
 
-    const heading = /^(#{3,6})\s+(.*)$/.exec(line);
+    // Display maths: \[ ... \] or $$ ... $$, possibly spanning lines.
+    if (trimmed.startsWith("\\[") || trimmed.startsWith("$$")) {
+      const open = trimmed.startsWith("\\[") ? "\\[" : "$$";
+      const close = open === "\\[" ? "\\]" : "$$";
+      const collected: string[] = [];
+      let rest = trimmed.slice(open.length);
+      let closed = false;
+      for (;;) {
+        const end = rest.indexOf(close);
+        if (end >= 0) {
+          collected.push(rest.slice(0, end));
+          rest = rest.slice(end + close.length);
+          closed = true;
+          break;
+        }
+        collected.push(rest);
+        index += 1;
+        if (index >= lines.length) break;
+        rest = lines[index] ?? "";
+      }
+      index += 1;
+      blocks.push({ type: "math", tex: collected.join("\n").trim() });
+      if (!closed && rest.trim().length > 0) {
+        blocks.push({ type: "p", text: rest.trim() });
+      }
+      continue;
+    }
+
+    // A pipe table needs a header row followed by an alignment/divider row.
+    if (
+      line.includes("|") &&
+      index + 1 < lines.length &&
+      TABLE_SEPARATOR.test(lines[index + 1] ?? "") &&
+      splitRow(line).length > 1
+    ) {
+      const head = splitRow(line);
+      const align = splitRow(lines[index + 1] ?? "").map(parseAlign);
+      const rows: string[][] = [];
+      index += 2;
+      while (index < lines.length) {
+        const row = lines[index] ?? "";
+        if (row.trim().length === 0 || !row.includes("|")) break;
+        rows.push(splitRow(row));
+        index += 1;
+      }
+      blocks.push({ type: "table", align, head, rows });
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       blocks.push({ type: "h", level: heading[1]!.length, text: heading[2]!.trim() });
       index += 1;
@@ -84,7 +257,7 @@ function parse(text: string): Block[] {
       continue;
     }
 
-    if (line.trim().length === 0) {
+    if (trimmed.length === 0) {
       index += 1;
       continue;
     }
@@ -96,9 +269,14 @@ function parse(text: string): Block[] {
       if (
         next.trim().length === 0 ||
         next.trim().startsWith("```") ||
-        /^(#{3,6})\s+/.test(next) ||
+        next.trim().startsWith("\\[") ||
+        next.trim().startsWith("$$") ||
+        /^#{1,6}\s+/.test(next) ||
         /^\s*[-*+]\s+/.test(next) ||
-        /^\s*\d+[.)]\s+/.test(next)
+        /^\s*\d+[.)]\s+/.test(next) ||
+        (next.includes("|") &&
+          index + 1 < lines.length &&
+          TABLE_SEPARATOR.test(lines[index + 1] ?? ""))
       ) {
         break;
       }
@@ -143,8 +321,9 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
 
 /**
  * Renders the Markdown subset we allow in answers: paragraphs, emphasis,
- * lists, headings, inline code and fenced code. Nothing is injected as HTML, so
- * model output cannot introduce markup.
+ * lists, headings, tables, inline code, fenced code and LaTeX maths. Nothing is
+ * injected as HTML except KaTeX's own escaped output, so model output cannot
+ * introduce markup.
  */
 export default function Markdown({ text }: { text: string }) {
   const blocks = parse(text);
@@ -153,6 +332,51 @@ export default function Markdown({ text }: { text: string }) {
       {blocks.map((block, index) => {
         if (block.type === "code") {
           return <CodeBlock key={index} lang={block.lang} code={block.code} />;
+        }
+        if (block.type === "math") {
+          return (
+            <div key={index} className="md-math-block">
+              <MathSpan tex={block.tex} display />
+            </div>
+          );
+        }
+        if (block.type === "table") {
+          return (
+            <div key={index} className="md-table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    {block.head.map((cell, cellIndex) => (
+                      <th
+                        key={cellIndex}
+                        style={block.align[cellIndex] ? { textAlign: block.align[cellIndex]! } : undefined}
+                      >
+                        {inline(cell, `th${index}-${cellIndex}`)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {block.rows.map((row, rowIndex) => (
+                    <tr key={rowIndex}>
+                      {block.head.map((_, cellIndex) => (
+                        <td
+                          key={cellIndex}
+                          style={
+                            block.align[cellIndex]
+                              ? { textAlign: block.align[cellIndex]! }
+                              : undefined
+                          }
+                        >
+                          {inline(row[cellIndex] ?? "", `td${index}-${rowIndex}-${cellIndex}`)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
         }
         if (block.type === "h") {
           return <p key={index} className="md-h">{inline(block.text, `h${index}`)}</p>;

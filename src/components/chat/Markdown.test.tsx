@@ -34,6 +34,55 @@ describe('Markdown', () => {
     expect(container.querySelector('pre')?.textContent).toBe('print(1)');
   });
 
+  it('renders LaTeX maths in both delimiter styles', () => {
+    const { container } = render(
+      <Markdown
+        text={[
+          'A point in \\(\\mathbb{R}^n\\) and \\(e_1\\).',
+          '',
+          '\\[',
+          '\\|a\\cdot b\\| \\le \\|a\\|\\|b\\|',
+          '\\]'
+        ].join('\n')}
+      />
+    );
+    const inlineMath = container.querySelectorAll('.md-math:not(.md-math--display)');
+    expect(inlineMath.length).toBe(2);
+    // Display maths gets its own block and is not left as raw TeX.
+    expect(container.querySelector('.md-math-block .katex-display')).not.toBeNull();
+    expect(container.textContent).not.toContain('\\mathbb');
+    expect(container.textContent).not.toContain('\\|a');
+  });
+
+  it('renders pipe tables and drops leaked control markers', () => {
+    const { container } = render(
+      <Markdown
+        text={[
+          '[[grounding:sources]] [[used:1,3]]',
+          'Intro line.',
+          '',
+          '| Idea | Use |',
+          '| --- | :--: |',
+          '| Dot product | Shading |',
+          '[[used:1,3,4,5]]'
+        ].join('\n')}
+      />
+    );
+    expect(container.querySelectorAll('table th')).toHaveLength(2);
+    expect(container.querySelectorAll('table td')).toHaveLength(2);
+    expect(container.textContent).toContain('Dot product');
+    expect(container.textContent).not.toContain('[[used');
+    expect(container.textContent).not.toContain('[[grounding');
+  });
+
+  it('keeps unescaped pipes inside maths from splitting table cells', () => {
+    const { container } = render(
+      <Markdown text={'| Idea | Formula |\n| --- | --- |\n| Norm | \\(||v|| = \\sqrt{v\\cdot v}\\) |'} />
+    );
+    expect(container.querySelectorAll('table td')).toHaveLength(2);
+    expect(container.querySelectorAll('table td')[1]?.querySelector('.katex')).not.toBeNull();
+  });
+
   it('never injects raw HTML', () => {
     const { container } = render(
       <Markdown text={'<img src="x" onerror="alert(1)"> and <script>bad()</script>'} />
