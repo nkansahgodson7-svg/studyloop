@@ -217,7 +217,7 @@ export function RouteSkeleton({ path }: { path: string }) {
   if (pathname === "/settings") return <SettingsGhost />;
   if (pathname.startsWith("/review/session")) return <ReviewSessionGhost />;
   if (pathname.startsWith("/notebooks/")) {
-    if (/\/chat\/\d+$/.test(pathname)) return <ChatGhost />;
+    if (/\/chat\/(?:\d+|new)$/.test(pathname)) return <ChatGhost />;
     return <NotebookGhost />;
   }
   return <GenericGhost />;

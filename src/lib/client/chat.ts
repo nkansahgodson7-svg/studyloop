@@ -46,6 +46,26 @@ export function createConversation(notebookId: number): Promise<ChatConversation
   return getJson<ChatConversation>(`/api/notebooks/${notebookId}/chats`, { method: "POST" });
 }
 
+/**
+ * A freshly created conversation, handed from the New chat screen to the chat
+ * screen in memory. That skips the detail round trip, so the real chat paints
+ * with a usable composer as soon as creation finishes. The entry is cleared
+ * when the chat screen unmounts so a later visit still loads messages.
+ */
+const conversationSeeds = new Map<number, ChatConversation>();
+
+export function seedConversation(conversation: ChatConversation): void {
+  conversationSeeds.set(conversation.id, conversation);
+}
+
+export function getConversationSeed(chatId: number): ChatConversation | null {
+  return conversationSeeds.get(chatId) ?? null;
+}
+
+export function clearConversationSeed(chatId: number): void {
+  conversationSeeds.delete(chatId);
+}
+
 export function loadConversation(
   chatId: number,
   before?: number

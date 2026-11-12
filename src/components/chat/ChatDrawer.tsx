@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/icons";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import {
-  createConversation,
   deleteConversation,
   loadConversations,
   renameConversation,
@@ -29,17 +28,18 @@ export default function ChatDrawer({
   notebookId,
   currentId,
   onOpen,
+  onNewChat,
   onDeleted
 }: {
   notebookId: number;
   currentId: number;
   onOpen: (id: number) => void;
+  onNewChat: () => void;
   onDeleted: (id: number) => void;
 }) {
   const { close } = useSheet();
   const [conversations, setConversations] = useState<ChatConversation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [draft, setDraft] = useState("");
 
@@ -56,20 +56,6 @@ export default function ChatDrawer({
       cancelled = true;
     };
   }, [notebookId]);
-
-  async function startChat() {
-    if (creating) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const conversation = await createConversation(notebookId);
-      close();
-      onOpen(conversation.id);
-    } catch (err) {
-      setError((err as Error).message);
-      setCreating(false);
-    }
-  }
 
   async function saveTitle(id: number) {
     const title = draft.trim();
@@ -191,10 +177,12 @@ export default function ChatDrawer({
         <button
           className="btn btn--primary btn--block"
           type="button"
-          onClick={() => void startChat()}
-          disabled={creating}
+          onClick={() => {
+            close();
+            onNewChat();
+          }}
         >
-          <Icon name="plus" size={16} /> {creating ? "Starting…" : "New chat"}
+          <Icon name="plus" size={16} /> New chat
         </button>
       }
     />

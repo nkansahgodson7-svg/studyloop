@@ -364,7 +364,8 @@ export default function NotebookScreen() {
       // swaps the page out for the skeleton.
       if (!_silent) setStatus("loading");
       try {
-        const next = await loadNotebook(id);
+        // Silent refreshes follow a mutation, so they must bypass the cache.
+        const next = await loadNotebook(id, { force: _silent });
         setBundle(next);
         setStatus("ready");
       } catch (error) {
