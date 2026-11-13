@@ -171,7 +171,6 @@ function ChatGhost() {
           </div>
           <Skeleton height={38} width={38} radius="var(--r-pill)" />
         </div>
-        <Skeleton height={11} width={110} style={{ marginTop: 8 }} />
       </div>
       <div className="chat-thread px">
         <Skeleton height={64} width="72%" />

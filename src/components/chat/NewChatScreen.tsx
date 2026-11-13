@@ -103,7 +103,6 @@ export default function NewChatScreen({ notebookId }: { notebookId: number }) {
             </button>
             <div className="chat-head__title">New chat</div>
           </div>
-          {notebookTitle ? <p className="chat-head__sub">{notebookTitle}</p> : null}
         </div>
         <div className="px">
           <div className="empty">
@@ -136,7 +135,6 @@ export default function NewChatScreen({ notebookId }: { notebookId: number }) {
             </button>
             <div className="chat-head__title">New chat</div>
           </div>
-          {notebookTitle ? <p className="chat-head__sub">{notebookTitle}</p> : null}
         </div>
 
         <div className="chat-thread">

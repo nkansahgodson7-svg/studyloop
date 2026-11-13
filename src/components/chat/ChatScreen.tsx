@@ -219,8 +219,19 @@ export default function ChatScreen({
   }, [conversation?.id]);
 
   useEffect(() => {
-    if (!stickRef.current) return;
-    sentinelRef.current?.scrollIntoView({ block: "end" });
+    const scroller = scrollerRef.current;
+    if (!stickRef.current || !scroller) return;
+    // Setting scrollTop (rather than scrollIntoView on the sentinel) lands the
+    // thread at its true end, so the jump-to-latest button stays hidden until
+    // the reader actually scrolls up.
+    const toEnd = () => {
+      if (stickRef.current && scrollerRef.current === scroller) {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    };
+    toEnd();
+    // Fonts and math can reflow the thread after the first paint.
+    void document.fonts?.ready.then(toEnd);
   }, [messages, stream?.text, stream?.grounding, turnError]);
 
   async function runTurn(
@@ -434,7 +445,6 @@ export default function ChatScreen({
               <Icon name="history" />
             </button>
           </div>
-          <p className="chat-head__sub">{notebookTitle}</p>
         </div>
 
         <div className="chat-thread">
