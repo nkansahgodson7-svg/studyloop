@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/ui/icons";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useSheet } from "@/components/ui/Sheet";
@@ -11,7 +11,9 @@ import { useSmartBack } from "@/lib/client/history";
 import { loadNotebook } from "@/lib/client/notebook-data";
 import {
   ChatRequestError,
+  clearConversationSeed,
   editQuestion,
+  getConversationSeed,
   loadConversation,
   regenerateAnswer,
   retryQuestion,
@@ -99,6 +101,17 @@ export default function ChatScreen({
   messagesRef.current = messages;
   hasMoreRef.current = hasMore;
 
+  // A chat created by the New chat screen arrives seeded, so this mount can
+  // paint immediately and only fetch the notebook metadata.
+  const seed = useMemo(() => getConversationSeed(chatId), [chatId]);
+
+  useEffect(() => {
+    if (!seed) return;
+    // Keep the seed through StrictMode's effect remount; drop it on real
+    // unmount so a later visit loads the conversation (and its messages).
+    return () => clearConversationSeed(seed.id);
+  }, [seed]);
+
   const refresh = useCallback(async (): Promise<ChatDetail> => {
     const detail = await loadConversation(chatId);
     setConversation(detail.conversation);
@@ -135,8 +148,9 @@ export default function ChatScreen({
 
   useEffect(() => {
     let cancelled = false;
-    setConversation(null);
+    setConversation(seed);
     setMessages([]);
+    setHasMore(false);
     setLoadError(null);
     setMissing(false);
     setTurnError(null);
@@ -144,9 +158,19 @@ export default function ChatScreen({
 
     void (async () => {
       try {
+        const notebookPromise = loadNotebook(notebookId).catch(() => null);
+        if (seed) {
+          const notebook = await notebookPromise;
+          if (cancelled) return;
+          if (notebook) {
+            setNotebookTitle(notebook.title);
+            setHasSources(notebook.sources.length > 0);
+          }
+          return;
+        }
         const [detail, notebook] = await Promise.all([
           loadConversation(chatId),
-          loadNotebook(notebookId).catch(() => null)
+          notebookPromise
         ]);
         if (cancelled) return;
         setConversation(detail.conversation);
@@ -176,7 +200,7 @@ export default function ChatScreen({
       abortRef.current?.abort();
       abortRef.current = null;
     };
-  }, [chatId, notebookId, router]);
+  }, [chatId, notebookId, router, seed]);
 
   useEffect(() => {
     const scroller = rootRef.current?.closest(".screen") as HTMLElement | null;
@@ -195,8 +219,19 @@ export default function ChatScreen({
   }, [conversation?.id]);
 
   useEffect(() => {
-    if (!stickRef.current) return;
-    sentinelRef.current?.scrollIntoView({ block: "end" });
+    const scroller = scrollerRef.current;
+    if (!stickRef.current || !scroller) return;
+    // Setting scrollTop (rather than scrollIntoView on the sentinel) lands the
+    // thread at its true end, so the jump-to-latest button stays hidden until
+    // the reader actually scrolls up.
+    const toEnd = () => {
+      if (stickRef.current && scrollerRef.current === scroller) {
+        scroller.scrollTop = scroller.scrollHeight;
+      }
+    };
+    toEnd();
+    // Fonts and math can reflow the thread after the first paint.
+    void document.fonts?.ready.then(toEnd);
   }, [messages, stream?.text, stream?.grounding, turnError]);
 
   async function runTurn(
@@ -316,6 +351,11 @@ export default function ChatScreen({
           startOptimisticNav(href);
           router.push(href);
         }}
+        onNewChat={() => {
+          const href = `/notebooks/${notebookId}/chat/new`;
+          startOptimisticNav(href);
+          router.push(href);
+        }}
         onDeleted={() => router.replace(`/notebooks/${notebookId}?tab=chat`)}
       />
     );
@@ -405,7 +445,6 @@ export default function ChatScreen({
               <Icon name="history" />
             </button>
           </div>
-          <p className="chat-head__sub">{notebookTitle}</p>
         </div>
 
         <div className="chat-thread">

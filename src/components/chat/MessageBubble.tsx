@@ -152,18 +152,18 @@ export default function MessageBubble({
   return (
     <div className="chat-turn chat-turn--ai">
       <div className="msg msg--ai" aria-busy={streaming && !hasText ? true : undefined}>
-        <div className="msg__label">
-          <Icon name="sparkle" size={12} className="i-sparkle" /> StudyLoop
-          {message.status === "stopped" ? <span className="msg__badge">Stopped</span> : null}
-        </div>
+        {message.status === "stopped" ? (
+          <div className="msg__meta">
+            <span className="msg__badge">Stopped</span>
+          </div>
+        ) : null}
         {hasText ? (
           <Markdown text={message.content} />
         ) : streaming ? (
           <div className="msg__body">
-            <span className="typing" aria-label="Thinking">
-              <span />
-              <span />
-              <span />
+            <span className="msg__status" role="status">
+              <Icon name="clock" size={14} />
+              Thinking…
             </span>
           </div>
         ) : null}

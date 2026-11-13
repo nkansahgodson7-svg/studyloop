@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import katex from "katex";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import "katex/dist/katex.min.css";
 import { Icon } from "@/components/ui/icons";
+import { loadKatex, renderTex } from "@/lib/client/katex";
 
 type Block =
   | { type: "p"; text: string }
@@ -23,27 +23,32 @@ function stripControlMarkers(text: string): string {
     .replace(/\[\s*\[\s*used\s*:[^\]]*\]\s*\]/gi, "");
 }
 
-function renderTex(tex: string, displayMode: boolean): string {
-  try {
-    return katex.renderToString(tex, {
-      displayMode,
-      throwOnError: false,
-      strict: false,
-      trust: false,
-      output: "html"
-    });
-  } catch {
-    return tex;
-  }
-}
-
 function MathSpan({ tex, display }: { tex: string; display: boolean }) {
+  const html = renderTex(tex, display);
+  const [ready, setReady] = useState(html !== null);
+
+  useEffect(() => {
+    if (ready) return;
+    let live = true;
+    void loadKatex().then(() => {
+      if (live) setReady(true);
+    });
+    return () => {
+      live = false;
+    };
+  }, [ready]);
+
+  const className = display ? "md-math md-math--display" : "md-math";
+  if (html === null) {
+    // KaTeX is still loading; show the formula source rather than nothing.
+    return <span className={className}>{tex}</span>;
+  }
   return (
     <span
-      className={display ? "md-math md-math--display" : "md-math"}
+      className={className}
       // KaTeX escapes its input and runs with `trust: false`, so this cannot
       // inject markup from model output.
-      dangerouslySetInnerHTML={{ __html: renderTex(tex, display) }}
+      dangerouslySetInnerHTML={{ __html: html }}
     />
   );
 }
@@ -324,8 +329,11 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
  * lists, headings, tables, inline code, fenced code and LaTeX maths. Nothing is
  * injected as HTML except KaTeX's own escaped output, so model output cannot
  * introduce markup.
+ *
+ * Memoised on `text`: a streaming answer re-renders the whole thread on every
+ * delta, and re-parsing unchanged earlier answers is what makes that janky.
  */
-export default function Markdown({ text }: { text: string }) {
+const Markdown = memo(function Markdown({ text }: { text: string }) {
   const blocks = parse(text);
   return (
     <div className="md">
@@ -412,4 +420,6 @@ export default function Markdown({ text }: { text: string }) {
       })}
     </div>
   );
-}
+});
+
+export default Markdown;
