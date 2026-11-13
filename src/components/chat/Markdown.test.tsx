@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 import Markdown from './Markdown';
 
 describe('Markdown', () => {
@@ -34,7 +34,7 @@ describe('Markdown', () => {
     expect(container.querySelector('pre')?.textContent).toBe('print(1)');
   });
 
-  it('renders LaTeX maths in both delimiter styles', () => {
+  it('renders LaTeX maths in both delimiter styles', async () => {
     const { container } = render(
       <Markdown
         text={[
@@ -48,8 +48,11 @@ describe('Markdown', () => {
     );
     const inlineMath = container.querySelectorAll('.md-math:not(.md-math--display)');
     expect(inlineMath.length).toBe(2);
-    // Display maths gets its own block and is not left as raw TeX.
-    expect(container.querySelector('.md-math-block .katex-display')).not.toBeNull();
+    // KaTeX is loaded on demand, then display maths gets its own block and is
+    // not left as raw TeX.
+    await waitFor(() => {
+      expect(container.querySelector('.md-math-block .katex-display')).not.toBeNull();
+    });
     expect(container.textContent).not.toContain('\\mathbb');
     expect(container.textContent).not.toContain('\\|a');
   });
@@ -75,12 +78,14 @@ describe('Markdown', () => {
     expect(container.textContent).not.toContain('[[grounding');
   });
 
-  it('keeps unescaped pipes inside maths from splitting table cells', () => {
+  it('keeps unescaped pipes inside maths from splitting table cells', async () => {
     const { container } = render(
       <Markdown text={'| Idea | Formula |\n| --- | --- |\n| Norm | \\(||v|| = \\sqrt{v\\cdot v}\\) |'} />
     );
     expect(container.querySelectorAll('table td')).toHaveLength(2);
-    expect(container.querySelectorAll('table td')[1]?.querySelector('.katex')).not.toBeNull();
+    await waitFor(() => {
+      expect(container.querySelectorAll('table td')[1]?.querySelector('.katex')).not.toBeNull();
+    });
   });
 
   it('never injects raw HTML', () => {

@@ -13,6 +13,7 @@ import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 import { authRedirectFor } from "@/lib/client/api";
+import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 import { useSmartBack } from "@/lib/client/history";
 
@@ -363,7 +364,8 @@ export default function NotebookScreen() {
       // swaps the page out for the skeleton.
       if (!_silent) setStatus("loading");
       try {
-        const next = await loadNotebook(id);
+        // Silent refreshes follow a mutation, so they must bypass the cache.
+        const next = await loadNotebook(id, { force: _silent });
         setBundle(next);
         setStatus("ready");
       } catch (error) {
@@ -451,6 +453,7 @@ export default function NotebookScreen() {
         if (current) notebookViewsCache.set(current.filter((view) => view.notebook.id !== id));
         else notebookViewsCache.invalidate();
         summaryCache.invalidate();
+        startOptimisticNav("/library");
         router.push("/library");
       } else {
         sheet.close();
@@ -463,7 +466,9 @@ export default function NotebookScreen() {
   }
 
   function startReview() {
-    router.push(`/review/session?notebook=${id}`);
+    const href = `/review/session?notebook=${id}`;
+    startOptimisticNav(href);
+    router.push(href);
   }
 
   function handleGenerate() {
@@ -607,8 +612,16 @@ export default function NotebookScreen() {
           <CardsPanelView
             bundle={bundle}
             onReview={startReview}
-            onPractice={() => router.push(`/review/session?notebook=${id}&practice=1`)}
-            onPracticeBatch={(batchId) => router.push(`/review/session?notebook=${id}&batch=${batchId}`)}
+            onPractice={() => {
+              const href = `/review/session?notebook=${id}&practice=1`;
+              startOptimisticNav(href);
+              router.push(href);
+            }}
+            onPracticeBatch={(batchId) => {
+              const href = `/review/session?notebook=${id}&batch=${batchId}`;
+              startOptimisticNav(href);
+              router.push(href);
+            }}
             onGenerate={handleGenerate}
           />
         )}

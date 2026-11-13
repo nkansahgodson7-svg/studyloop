@@ -4,11 +4,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Icon } from "@/components/ui/icons";
 import { authRedirectFor } from "@/lib/client/api";
-import {
-  createConversation,
-  loadConversations,
-  type ChatConversation
-} from "@/lib/client/chat";
+import { startOptimisticNav } from "@/lib/client/optimistic-nav";
+import { loadConversations, type ChatConversation } from "@/lib/client/chat";
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -36,7 +33,6 @@ export default function ChatListPanel({
   const router = useRouter();
   const [conversations, setConversations] = useState<ChatConversation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -57,22 +53,12 @@ export default function ChatListPanel({
     void load();
   }, [load]);
 
-  async function startChat() {
-    if (creating) return;
-    setCreating(true);
-    setError(null);
-    try {
-      const conversation = await createConversation(notebookId);
-      router.push(`/notebooks/${notebookId}/chat/${conversation.id}`);
-    } catch (err) {
-      const redirect = authRedirectFor(err);
-      if (redirect) {
-        router.replace(redirect);
-        return;
-      }
-      setError((err as Error).message);
-      setCreating(false);
-    }
+  function startChat() {
+    // The new-chat route paints the chat frame while the server creates the
+    // conversation, so the click never waits on the network.
+    const href = `/notebooks/${notebookId}/chat/new`;
+    startOptimisticNav(href);
+    router.push(href);
   }
 
   return (
@@ -86,13 +72,8 @@ export default function ChatListPanel({
         ) : null}
       </div>
 
-      <button
-        className="btn btn--ai btn--block"
-        type="button"
-        onClick={() => void startChat()}
-        disabled={creating}
-      >
-        <Icon name="plus" size={17} /> {creating ? "Starting…" : "New chat"}
+      <button className="btn btn--ai btn--block" type="button" onClick={startChat}>
+        <Icon name="plus" size={17} /> New chat
       </button>
 
       {error ? (
@@ -127,7 +108,11 @@ export default function ChatListPanel({
               key={conversation.id}
               type="button"
               className="row chat-row"
-              onClick={() => router.push(`/notebooks/${notebookId}/chat/${conversation.id}`)}
+              onClick={() => {
+                const href = `/notebooks/${notebookId}/chat/${conversation.id}`;
+                startOptimisticNav(href);
+                router.push(href);
+              }}
             >
               <span className="row__tile tone-lilac">
                 <Icon name="sparkle" size={18} className="i-sparkle" />

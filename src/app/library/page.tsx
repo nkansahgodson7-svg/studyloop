@@ -5,6 +5,7 @@ import { ScreenSection } from "@/components/ui/ScreenSection";
 import { RowSkeletonList, Skeleton } from "@/components/ui/Skeleton";
 import { Icon, TONES, plural } from "@/components/ui/icons";
 import { useNotebookList } from "@/lib/client/useNotebooks";
+import { optimisticLinkClick } from "@/lib/client/optimistic-nav";
 
 export default function LibraryPage() {
   const { views, openCreateSheet, creating } = useNotebookList();
@@ -47,7 +48,12 @@ export default function LibraryPage() {
                 const { notebook } = view;
                 const tone = TONES[notebook.id % TONES.length];
                 return (
-                  <Link key={notebook.id} className="row" href={`/notebooks/${notebook.id}`}>
+                  <Link
+                    key={notebook.id}
+                    className="row"
+                    href={`/notebooks/${notebook.id}`}
+                    onClick={optimisticLinkClick(`/notebooks/${notebook.id}`)}
+                  >
                     <span className={`row__tile ${tone}`} aria-hidden="true">
                       {(notebook.title.charAt(0) || "N").toUpperCase()}
                     </span>
