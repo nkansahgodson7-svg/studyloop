@@ -1,0 +1,256 @@
+# StudyLoop — Codebase Document (Security & Performance Lens)
+
+_Generated from the repository at branch `audit`. Applies the `security-and-hardening` and `performance-optimization` skill lenses to the current codebase._
+
+---
+
+## 1. Project at a glance
+
+- **Name / version:** `studyloop` 0.1.0 (private)
+- **Runtime:** Next.js 15 App Router (Node runtime), React 19, TypeScript strict (`noUncheckedIndexedAccess`)
+- **Database:** libSQL (`@libsql/client`) — Turso in production, local file (`data/studyloop.db`) in dev/tests
+- **Auth:** Cookie sessions (httpOnly, signed), scrypt password hashes, invite-code signup
+- **LLM:** Groq OpenAI-compatible API, server-side only; owner env key default + per-user encrypted BYO override
+- **Tests:** Vitest + Testing Library + jsdom; Playwright e2e; gate = `npm test && npm run typecheck && npm run lint && npm run build`
+- **Deploy:** Vercel Hobby, push-to-deploy
+
+Top-level layout:
+
+```
+src/
+  app/                routes: (auth) login, notebooks, admin, review, settings, ...
+  app/api/            route handlers (thin: validate → repo/ai → JSON)
+  components/         UI components
+  lib/                pure helpers (client pdf extraction, formatters)
+  lib/server/         ai/, ingest/, auth/, fsrs, conversations, repo, ratelimit
+  lib/db.ts           schema DDL + lazily-opened libSQL client
+  lib/password.ts
+  middleware.ts       edge middleware (session cookie validation)
+  instrumentation.ts  boot env validation
+frontend/             static companion mockup (vanilla JS)
+public/               mock/ assets, service worker, icons
+docs/                 spec.md
+tasks/                plan.md, todo.md, flashcard-overhaul-plan.md
+```
+
+---
+
+## 2. Trust boundaries (security)
+
+| Boundary | Source | Notes |
+|---|---|---|
+| HTTP request body/params | User | Every route validates via arktype or manual checks before DB/AI |
+| URL path params (`[id]`, `[chatId]`) | User | Coerced with `Number()` + `Number.isInteger()` guards |
+| Cookie (`sl_session`) | User-controlled bytes | Signed HMAC; middleware + `requireUser` re-validate against DB |
+| LLM output (Groq) | Untrusted | Rendered as JSX text only; KaTeX escapes; control-line parser strips markers |
+| Source excerpts (RAG) | Untrusted data | Delimited + explicitly marked untrusted in system prompt |
+| YouTube transcripts / PDF text | Untrusted | Ingested as text; chunked into FTS5 |
+| Environment vars | Operator | Validated at boot (`validateRuntimeEnv`) in production |
+| External fetch (Groq) | Outbound | Single allowlisted host, no user-supplied URLs |
+
+Key security controls already in place:
+
+- **Parameterized SQL everywhere** (repo.ts uses `?` placeholders; no string interpolation of user input). `deleteUser` uses sub-select filters, not user input.
+- **Passwords:** scrypt (N=2^15, r=8, p=1, maxmem 128MB), salted, with transparent rehash from legacy params. Min length 10 (enforced at signup/change-password; login has no min so existing users can sign in).
+- **Sessions:** httpOnly, secure in prod, sameSite lax, signed cookie (HMAC-SHA256 via WebCrypto, edge-safe). Revocation immediate via DB lookup. 7-day TTL.
+- **Secrets at rest:** BYO LLM keys encrypted AES-256-GCM with scrypt-derived key (v2), v1 legacy decrypt supported. `ENCRYPTION_SECRET` required in prod.
+- **Login throttling:** DB-backed, per-account (10/15min) + per-IP (30/15min); unknown emails get a dummy hash to equalize timing; disabled accounts return same error either way.
+- **Headers:** CSP (self + unsafe-inline scripts, no eval in prod), HSTS (2yr), X-Frame-Options DENY, nosniff, Referrer-Policy, Permissions-Policy. Set in `next.config.ts` for all paths.
+- **Proxy-aware client IP:** `TRUST_PROXY_HOPS` reads from the trusted end of X-Forwarded-For.
+- **Security headers on every route** including API (Next `headers()` applies to `/:path*`).
+- **No secrets in logs:** provider error text logged server-side only, generic message to client. No `console.log` of keys/passwords/tokens found.
+- **No `eval()` usage.** `dangerouslySetInnerHTML` only in three places, all reviewed:
+  - `Markdown.tsx` KaTeX output (sanitized by KaTeX with `trust: false`) — documented.
+  - `AppShell.tsx` exit-animation snapshot (client-captured already-rendered DOM, not user input) — low risk but note.
+  - `icons.tsx` glyph (static icon markup) — low risk.
+- **XSS posture:** React auto-escaping for all user/AI content. Markdown renderer never injects raw HTML. URLs render as plain text.
+- **Prompt injection mitigation:** excerpts delimited, marked untrusted, model instructed to ignore instructions inside them (lowers risk, does not remove it — per PR notes).
+- **Resource limits:** ≤100 notebooks/user, ≤100 sources/notebook (enforced in ingest). Source text cap 2MB. Question max 2000 chars. Chat history trimmed to 6000 chars.
+- **Rate limits:** DB-backed, per user, for LLM/expensive routes (chat 150/hr, generate 30/hr, ingest 20/hr, youtube 10/hr, signup, change-password).
+- **Authorization:** every protected route calls `requireUser`/`requireAdmin`; ownership checked via `ownNotebook`/`ownConversation` (returns 404 for foreign/missing to avoid existence oracle).
+- **Cascade deletes:** notebooks → sources/chunks/cards/conversations/messages; users → notebooks.
+- **Dependency audit:** vitest upgraded for tinypool advisory; `.opencode/` untracked.
+
+Known gaps / things to watch (from PR notes + review):
+
+- `postcss` advisory via Next (needs Next 16, breaking).
+- `public/mock/index.html` still loads Google Fonts; CSP blocks them there (cosmetic).
+- Account lockout: attacker who knows an email can lock it 15 min (trade-off).
+- `AppShell.tsx` captures `el.innerHTML` for transition animation — ensure it never captures unsanitized content (it captures rendered DOM, but review if any user-controlled HTML ever lands in `.screen`).
+- No CSRF token beyond sameSite=lax cookies (acceptable for same-origin API, but review if cross-site POSTs become a concern).
+- `TRUST_PROXY_HOPS` unset defaults to trusting leftmost XFF entry — spoofable behind non-Vercel proxies; document for deployers.
+- `ENCRYPTION_SECRET` fallback to insecure dev secret in non-prod; boot validation only in prod. Ensure prod always sets it.
+- Health endpoint (`/api/health`) runs `SELECT 1` with no auth — fine for liveness, but consider not exposing DB errors.
+- `reset-demo` / admin endpoints: verify admin gating (spot-check `requireAdmin`).
+- No request body size limit beyond Next defaults; large PDF text capped at 2MB client-side extraction, but server accepts up to 2MB text.
+- LLM key never returned to client (only `hasPersonalKey` boolean) — good.
+- `dummyHash` cached globally; fine.
+
+---
+
+## 3. Performance posture
+
+### 3.1 Database / query layer
+
+- **N+1 avoidance:** notebook list query was fixed to not multiply rows across sources/cards/reviews (per PR notes). Admin stats uses correlated subqueries + CTE for activity — acceptable for small user base, but heavy for large datasets.
+- **Indexes present:** `notebooks(user_id)`, `sources(notebook_id)`, `cards(notebook_id)`, `source_chunks(source_id, ord)`, `reviews(due)`, `chat_conversations(notebook_id, updated_at DESC)`, `chat_messages(conversation_id, id)`, `rate_limits(reset_at)`, `review_log(card_id, graded_at)`, `quiz_items(notebook_id)`, `quiz_attempts(user_id)`, `cards(source_id)`, `card_batches(notebook_id, created_at)`, `sessions(user_id)`.
+- **Batch inserts:** source chunks inserted in batches during ingestion (per PR notes).
+- **Pagination:** chat messages 50/page with `?before=` cursor; admin lists not paginated (fine for small group).
+- **FTS5:** source_chunks_fts virtual table with triggers; keyword retrieval top-5.
+- **Potential hotspot:** `listUsers` admin query has many correlated subqueries and a large UNION activity CTE — O(users × notebooks). Fine for ~4 users, would not scale.
+- **Potential hotspot:** `computeAdminStats` / `listNotebookViews` (not read) — check for N+1 in repo.
+
+### 3.2 LLM / network
+
+- **Client reuse:** YouTube client reused, caption fetches have timeout (per PR notes).
+- **Chat cancellation:** client disconnect cancels LLM request via `req.signal` wired to Groq fetch. Good.
+- **Streaming:** SSE with proper headers; abort handling persists partial as "stopped".
+- **Timeouts:** title generation 5s. Groq fetch has no explicit timeout beyond abort signal — consider adding.
+- **No caching of LLM responses** (by design; each question distinct).
+
+### 3.3 Frontend
+
+- **Fonts:** Inter + Fraunces self-hosted via @fontsource-variable (replaced render-blocking Google Fonts import). Good.
+- **Code splitting:** Next App Router handles route-level splitting. `Markdown` memoized on `text` to avoid re-parsing unchanged answers during streaming.
+- **Heavy libs:** `pdfjs-dist` client-side extraction; `katex` loaded on demand; `youtubei.js` server-side.
+- **Bundle:** no explicit bundle budget enforced in CI (performance skill recommends <200KB gzipped initial). Not configured.
+- **Images:** `next/image` usage? Check; icons are SVG. No large raster images evident.
+- **Re-renders:** `AppShell` captures exit HTML on every navigation; potential perf cost but bounded.
+- **No virtualization** for long lists (notebook list, chat history) — chat paginates; notebooks likely small.
+
+### 3.4 Ingestion
+
+- PDF ≤100 pages; chunks batched. YouTube transcript fetch with timeout. Plain text/markdown paste.
+
+---
+
+## 4. Architecture & data flow (selected)
+
+- Route handlers stay thin: validate (arktype) → call repo/ai layer → return JSON. Confirmed in `sources.ts`, `llmkey.ts`.
+- All SQL through `repo.ts` + `conversations.ts`. Async (libSQL).
+- AI prompts in `src/lib/server/ai/prompts.ts` (not read here) as pure functions.
+- Zustand single store on client.
+- Error envelope `{ error: string }` with status codes. Confirmed.
+- User/AI content as JSX text only. Confirmed (except documented innerHTML).
+
+---
+
+## 5. Security review checklist (skill) — status
+
+### Authentication
+- [x] Passwords hashed with scrypt (salt rounds equivalent high cost)
+- [x] Session tokens httpOnly, secure (prod), sameSite
+- [x] Login rate limiting (DB-backed, per-account + per-IP)
+- [ ] Password reset tokens expire — N/A (admin resets; temp passwords expire via `password_expires_at`)
+- [x] Dummy-hash timing equalization for unknown emails
+
+### Authorization
+- [x] Every endpoint checks user permissions (`requireUser`/`requireAdmin`)
+- [x] Users only access own resources (`ownNotebook`/`ownConversation`)
+- [x] Admin actions require admin role
+- [ ] Spot-check: all 34 route files call requireUser/requireAdmin (recommended audit)
+
+### Input
+- [x] All user input validated at boundary (arktype or manual)
+- [x] SQL parameterized
+- [x] HTML output encoded/escaped (React auto-escape)
+- [ ] Server-side URL fetches allowlisted — only Groq host hardcoded; no user-supplied URLs fetched (YouTube URL is parsed, not fetched by user control). Low SSRF surface.
+
+### Data
+- [x] No secrets in code or version control (`.env` gitignored; `.env.example` committed)
+- [x] Sensitive fields excluded from API responses (LLM key → boolean only)
+- [x] PII (email) stored; consider retention/deletion (deleteUser cascades)
+- [x] Personal data deletion path exists (`deleteUser`)
+- [ ] Retention/TTL policy for sessions, rate_limits, review_log — rate_limits purged probabilistically; sessions expire but rows linger. Minor.
+
+### Infrastructure
+- [x] Security headers configured (CSP, HSTS, etc.)
+- [x] CORS — same-origin only (no CORS config; API same-origin)
+- [x] Dependencies audited (vitest upgraded)
+- [x] Error messages don't expose internals (generic messages; detail logged server-side)
+
+### Supply chain
+- [x] One lockfile (`package-lock.json`), npm
+- [ ] Native audit run (`npm audit`) — recommended before release
+- [ ] Dependency scripts review — not documented
+
+### AI / LLM
+- [x] Model output treated as untrusted (JSX text, KaTeX escaped)
+- [x] Secrets kept out of prompts (BYO key resolved server-side, not in prompt)
+- [x] Tool/agent permissions scoped (N/A — no agents)
+- [x] Consumption bounded (max_tokens, rate limits, question length cap)
+
+---
+
+## 6. Performance optimization checklist (skill) — status
+
+- [x] N+1 queries addressed in notebook list (per PR)
+- [x] Batch inserts for source chunks
+- [x] Image optimization — N/A (SVG/icons)
+- [x] Code splitting via Next App Router
+- [x] Memoization where measured (`Markdown` memo on text)
+- [ ] Bundle size budget not configured in CI
+- [ ] Lighthouse/CI performance gate not configured
+- [ ] No RUM (web-vitals) collection beyond Vercel Analytics (maybe)
+- [ ] Admin stats query not paginated / not optimized for scale (small group OK)
+- [ ] Groq fetch has no explicit timeout (abort signal only)
+- [ ] No caching layer (by design; data changes frequently)
+
+---
+
+## 7. Recommended next steps (not implemented)
+
+Security:
+1. Run `npm audit` and triage by reachability; document deferrals.
+2. Spot-audit all 34 route handlers for `requireUser`/`requireAdmin` + ownership.
+3. Add explicit timeout to Groq fetch (e.g., 60s) in addition to abort signal.
+4. Purge expired sessions periodically (or on login) to keep table small.
+5. Review `AppShell.tsx` innerHTML capture for any future user-controlled content.
+6. Confirm `TRUST_PROXY_HOPS` documented for deployers; default should perhaps be unset-safe.
+
+Performance:
+1. Add a bundle size budget + Lighthouse CI if desired (currently not configured).
+2. Profile admin stats query if user base grows; add pagination.
+3. Consider virtualization only if notebook/chat lists grow beyond hundreds.
+4. Re-measure before keeping any new optimization (skill discipline).
+
+---
+
+## 8. How to run / verify
+
+```bash
+npm install
+npm run db:migrate      # creates tables + indexes
+npm test                # Vitest
+npm run typecheck       # tsc --noEmit
+npm run lint            # oxlint
+npm run build           # next build
+```
+
+Gate: `npm run gate` runs all four. A change is complete only when green.
+
+---
+
+## 9. Files of interest
+
+| File | Purpose |
+|---|---|
+| `src/lib/db.ts` | Schema DDL + client factory |
+| `src/lib/server/repo.ts` | All SQL (parameterized) |
+| `src/lib/server/auth.ts` | Login/signup/session/requireUser |
+| `src/lib/server/crypto.ts` | scrypt passwords, AES-GCM keys, HMAC session cookie |
+| `src/lib/server/session-cookie.ts` | Edge-safe signed cookie |
+| `src/lib/server/ratelimit.ts` | DB-backed rate limits + client IP |
+| `src/lib/server/chat.ts` | Chat streaming, grounding, abort handling |
+| `src/lib/server/conversations.ts` | Conversation/message CRUD |
+| `src/lib/server/llmkey.ts` | BYO key save/clear/load |
+| `src/lib/server/sources.ts` | Source ingest endpoints |
+| `src/middleware.ts` | Edge auth redirect logic |
+| `src/instrumentation.ts` | Boot env validation |
+| `next.config.ts` | CSP + security headers |
+| `src/components/chat/Markdown.tsx` | Safe markdown renderer (KaTeX) |
+| `src/components/AppShell.tsx` | Nav shell with exit animation (innerHTML) |
+
+---
+
+_End of document. This file is a living reference; update as the codebase evolves._
