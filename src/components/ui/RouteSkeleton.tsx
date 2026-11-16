@@ -125,41 +125,6 @@ function SettingsGhost() {
   );
 }
 
-function NotebookGhost() {
-  return (
-    <GhostScreen>
-      <GhostTopBar />
-      <div className="nb-hero">
-        <Skeleton height={58} width={58} radius="18px" />
-        <div className="nb-hero__main">
-          <Skeleton height={24} width={168} radius="var(--r-sm)" />
-          <Skeleton height={11} width={132} />
-        </div>
-      </div>
-      <div className="px">
-        <div className="segmented">
-          <Skeleton height={44} radius="var(--r-pill)" />
-          <Skeleton height={44} radius="var(--r-pill)" />
-          <Skeleton height={44} radius="var(--r-pill)" />
-        </div>
-      </div>
-      <div className="tabpanel px stack--16">
-        <div className="card card--flat spread">
-          <div className="stack--6">
-            <Skeleton height={16} width={112} />
-            <Skeleton height={11} width={152} />
-          </div>
-          <Skeleton height={34} width={86} radius="var(--r-pill)" />
-        </div>
-        <div className="section-head">
-          <h2>Sources</h2>
-        </div>
-        <RowSkeletonList count={2} />
-      </div>
-    </GhostScreen>
-  );
-}
-
 function ChatGhost() {
   return (
     <GhostScreen>
@@ -217,7 +182,9 @@ export function RouteSkeleton({ path }: { path: string }) {
   if (pathname.startsWith("/review/session")) return <ReviewSessionGhost />;
   if (pathname.startsWith("/notebooks/")) {
     if (/\/chat\/(?:\d+|new)$/.test(pathname)) return <ChatGhost />;
-    return <NotebookGhost />;
+    // No ghost for the notebook screen: it paints its own skeleton as soon as
+    // it commits, so a ghost here showed two skeletons back to back.
+    return null;
   }
   return <GenericGhost />;
 }

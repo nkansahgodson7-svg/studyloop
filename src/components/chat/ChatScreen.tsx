@@ -362,10 +362,10 @@ export default function ChatScreen({
   }
 
   const backHref = `/notebooks/${notebookId}?tab=chat`;
-  const goBack = useSmartBack(
-    backHref,
-    (from) => from === `/notebooks/${notebookId}` || from.startsWith(`/notebooks/${notebookId}/chat/`)
-  );
+  // Only the notebook itself is a real origin. Another chat is a sibling, not a
+  // parent, so honouring it here sent back through every chat the user had
+  // opened; the notebook (chat tab) is always the destination instead.
+  const goBack = useSmartBack(backHref, (from) => from === `/notebooks/${notebookId}`);
 
   if (missing) {
     return (

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { Icon, TONES, plural } from "@/components/ui/icons";
+import { RowSkeletonList, Skeleton } from "@/components/ui/Skeleton";
 import { useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { SheetFrame } from "@/components/ui/Sheet";
@@ -502,12 +503,38 @@ export default function NotebookScreen() {
           </button>
           <span className="topbar__title grow">Notebook</span>
         </div>
-        <div className="px stack--16" style={{ marginTop: 6 }} role="status" aria-busy="true">
+        {/* Mirrors the overview layout (hero, segmented tabs, summary card,
+            sources) so the load reads as one screen settling in, not a jump
+            from a generic placeholder. */}
+        <div role="status" aria-busy="true">
           <span className="sr-only">Opening notebook…</span>
-          <div className="skeleton" style={{ height: 96 }} />
-          <div className="skeleton" style={{ height: 44 }} />
-          <div className="skeleton" style={{ height: 68 }} />
-          <div className="skeleton" style={{ height: 68 }} />
+          <div className="nb-hero">
+            <Skeleton height={58} width={58} radius="18px" />
+            <div className="nb-hero__main">
+              <Skeleton height={24} width={168} radius="var(--r-sm)" />
+              <Skeleton height={11} width={132} />
+            </div>
+          </div>
+          <div className="px">
+            <div className="segmented">
+              <Skeleton height={44} radius="var(--r-pill)" />
+              <Skeleton height={44} radius="var(--r-pill)" />
+              <Skeleton height={44} radius="var(--r-pill)" />
+            </div>
+          </div>
+          <div className="tabpanel px stack--16">
+            <div className="card card--flat spread">
+              <div className="stack--6">
+                <Skeleton height={16} width={112} />
+                <Skeleton height={11} width={152} />
+              </div>
+              <Skeleton height={34} width={86} radius="var(--r-pill)" />
+            </div>
+            <div className="section-head">
+              <h2>Sources</h2>
+            </div>
+            <RowSkeletonList count={2} />
+          </div>
         </div>
       </ScreenSection>
     );
