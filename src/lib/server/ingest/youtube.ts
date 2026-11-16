@@ -5,7 +5,13 @@ import { ownNotebook } from '../notebooks';
 import { ingestTextSource } from './ingest';
 import { YOUTUBE_INGEST_LIMIT, rateLimitResponse } from '../ratelimit';
 
-export const YOUTUBE_URL_HOSTS = new Set(['youtube.com', 'm.youtube.com', 'youtu.be', 'music.youtube.com']);
+export const YOUTUBE_URL_HOSTS = new Set([
+  'youtube.com',
+  'm.youtube.com',
+  'youtu.be',
+  'music.youtube.com',
+  'youtube-nocookie.com'
+]);
 
 export interface TranscriptSegment {
   text: string;
@@ -16,6 +22,7 @@ export interface FetchedTranscript {
   videoId: string;
   title: string;
   segments: TranscriptSegment[];
+  durationSeconds?: number;
 }
 
 export type TranscriptFetcher = (videoId: string) => Promise<FetchedTranscript>;
@@ -39,6 +46,64 @@ const BROWSER_HEADERS: Record<string, string> = {
   'accept-language': 'en-US,en;q=0.9'
 };
 
+interface PlayerClient {
+  name: string;
+  version: string;
+  userAgent: string;
+  extra?: Record<string, string | number>;
+}
+
+/**
+ * The web player's caption-track URLs carry `exp=xpe`, YouTube's
+ * proof-of-origin guard. They answer 200 with an empty body outside a real
+ * browser. The player endpoint answers mobile clients with ordinary signed
+ * URLs, so we ask it first and fetch those instead.
+ */
+const PLAYER_CLIENTS: PlayerClient[] = [
+  {
+    name: 'IOS',
+    version: '20.11.6',
+    userAgent: 'com.google.ios.youtube/20.11.6 (iPhone10,4; U; CPU iOS 16_7_7 like Mac OS X)',
+    extra: { deviceModel: 'iPhone10,4', osName: 'iOS', osVersion: '16.7.7.20H330' }
+  },
+  {
+    name: 'ANDROID',
+    version: '21.03.36',
+    userAgent:
+      'com.google.android.youtube/21.03.36(Linux; U; Android 16; en_US; SM-S908E Build/TP1A.220624.014) gzip',
+    extra: { androidSdkVersion: 36 }
+  },
+  // Cloud/Vercel egress is often challenged by the phone clients; the VR and
+  // embedded-TV clients tend to answer without a proof-of-origin token.
+  {
+    name: 'ANDROID_VR',
+    version: '1.60.19',
+    userAgent:
+      'com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12; en_US; Quest 3 Build/SQ3A.220605.009.A1) gzip',
+    extra: {
+      androidSdkVersion: 32,
+      deviceModel: 'Quest 3',
+      osName: 'Android',
+      osVersion: '12'
+    }
+  },
+  {
+    name: 'TVHTML5_SIMPLY_EMBEDDED_PLAYER',
+    version: '2.0',
+    userAgent:
+      'Mozilla/5.0 (PlayStation; PlayStation 4/12.00) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Safari/605.1.15',
+    extra: { clientScreen: 'EMBED' }
+  },
+  {
+    name: 'WEB_EMBEDDED_PLAYER',
+    version: '1.20241120.01.00',
+    userAgent: BROWSER_HEADERS['user-agent']!,
+    extra: { clientScreen: 'EMBED' }
+  }
+];
+
+const PLAYER_ENDPOINT = 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+
 export function extractVideoId(input: string): string | null {
   let url: URL;
   try {
@@ -52,12 +117,13 @@ export function extractVideoId(input: string): string | null {
     return id && /^[0-9A-Za-z_-]{5,20}$/.test(id) ? id : null;
   }
   if (YOUTUBE_URL_HOSTS.has(host)) {
-    if (url.pathname === '/watch') {
+    if (url.pathname === '/watch' || url.pathname === '/watch/') {
       const id = url.searchParams.get('v');
       return id && /^[0-9A-Za-z_-]{5,20}$/.test(id) ? id : null;
     }
-    const shorts = url.pathname.match(/^\/shorts\/([0-9A-Za-z_-]{5,20})/);
-    return shorts?.[1] ?? null;
+    // /shorts/, /live/, /embed/ and legacy /v/ URLs all put the id in the path.
+    const pathId = url.pathname.match(/^\/(?:shorts|live|embed|v)\/([0-9A-Za-z_-]{5,20})(?:[/?]|$)/);
+    return pathId?.[1] ?? null;
   }
   return null;
 }
@@ -227,13 +293,14 @@ export function parseJson3(raw: string): TranscriptSegment[] {
 
 /**
  * Parse a `srv3` / default XML timedtext response into segments.
- * `start` in timedtext is seconds; convert to ms.
+ * `start` in the default format is seconds; srv3/`<p>` tags use `t` in ms.
  */
 export function parseTimedTextXml(raw: string): TranscriptSegment[] {
   const segments: TranscriptSegment[] = [];
-  const re = /<text\b[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+
+  const textRe = /<text\b[^>]*\bstart="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(raw)) !== null) {
+  while ((match = textRe.exec(raw)) !== null) {
     const startSeconds = parseFloat(match[1]!);
     const text = decodeXmlEntities(match[2]!)
       .replace(/<[^>]+>/g, '')
@@ -241,6 +308,20 @@ export function parseTimedTextXml(raw: string): TranscriptSegment[] {
       .trim();
     if (text.length > 0 && Number.isFinite(startSeconds)) {
       segments.push({ text, startMs: Math.round(startSeconds * 1000) });
+    }
+  }
+  if (segments.length > 0) return segments;
+
+  // srv3: <timedtext format="3"><body><p t="1200" d="2160">...</p>
+  const paragraphRe = /<p\b[^>]*\bt="(\d+)"[^>]*>([\s\S]*?)<\/p>/g;
+  while ((match = paragraphRe.exec(raw)) !== null) {
+    const startMs = Number(match[1]);
+    const text = decodeXmlEntities(match[2]!)
+      .replace(/<[^>]+>/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length > 0 && Number.isFinite(startMs)) {
+      segments.push({ text, startMs });
     }
   }
   return segments;
@@ -254,10 +335,11 @@ export function parseVtt(raw: string): TranscriptSegment[] {
     const lines = block.trim().split('\n');
     const timingLine = lines.find((line) => line.includes('-->'));
     if (!timingLine) continue;
-    const match = timingLine.match(/(\d{2}):(\d{2}):(\d{2})\.(\d{3})\s*-->/);
+    const match = timingLine.match(/(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->/);
     if (!match) continue;
+    const hours = Number(match[1] ?? 0);
     const startMs =
-      (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000 + Number(match[4]);
+      (hours * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000 + Number(match[4]);
     const textLines = lines.slice(lines.indexOf(timingLine) + 1);
     const text = decodeXmlEntities(textLines.join(' '))
       .replace(/<[^>]+>/g, '')
@@ -278,6 +360,9 @@ function parseByFormat(raw: string, format: string): TranscriptSegment[] {
 
 const FETCH_TIMEOUT_MS = 30_000;
 const OVERALL_TIMEOUT_MS = 45_000;
+// Videos can expose dozens of translated tracks; trying every one turns a
+// single bad captions response into a minute-long request.
+const MAX_TRACK_ATTEMPTS = 4;
 
 async function fetchWithTimeout(
   url: string,
@@ -294,11 +379,16 @@ async function fetchWithTimeout(
   }
 }
 
-async function fetchTrackText(baseUrl: string, format: string, fetchImpl: FetchLike): Promise<string> {
+async function fetchTrackText(
+  baseUrl: string,
+  format: string,
+  fetchImpl: FetchLike,
+  headers: Record<string, string> = BROWSER_HEADERS
+): Promise<string> {
   const separator = baseUrl.includes('?') ? '&' : '?';
   const url = format ? `${baseUrl}${separator}fmt=${format}` : baseUrl;
   const res = await fetchWithTimeout(url, FETCH_TIMEOUT_MS, fetchImpl, {
-    headers: { ...BROWSER_HEADERS, referer: 'https://www.youtube.com/' }
+    headers: { ...headers, referer: 'https://www.youtube.com/' }
   });
   if (!res.ok) {
     throw youtubeFailure('FETCH_FAILED', `transcript request failed (${res.status})`);
@@ -310,14 +400,18 @@ async function fetchTrackText(baseUrl: string, format: string, fetchImpl: FetchL
  * Try to extract a transcript from a caption track, attempting several
  * formats until one yields segments.
  */
-async function fetchFromTrack(track: CaptionTrack, fetchImpl: FetchLike): Promise<TranscriptSegment[]> {
+async function fetchFromTrack(
+  track: CaptionTrack,
+  fetchImpl: FetchLike,
+  headers?: Record<string, string>
+): Promise<TranscriptSegment[]> {
   const base = trackBaseUrl(track);
   if (!base) throw youtubeFailure('NO_CAPTIONS', 'no transcript available for this video');
 
   const formats = ['json3', 'srv3', ''];
   for (const format of formats) {
     try {
-      const raw = await fetchTrackText(base, format, fetchImpl);
+      const raw = await fetchTrackText(base, format, fetchImpl, headers);
       if (raw.trim().length === 0) continue;
       const segments = parseByFormat(raw, format === '' ? 'xml' : format);
       if (segments.length > 0) return segments;
@@ -352,7 +446,8 @@ export async function fetchTranscriptFromWatchPage(
     throw youtubeFailure('NO_CAPTIONS', 'no transcript available for this video');
   }
 
-  for (const track of orderCaptionTracks(tracks, options.language ?? 'en')) {
+  const trackOrder = orderCaptionTracks(tracks, options.language ?? 'en').slice(0, MAX_TRACK_ATTEMPTS);
+  for (const track of trackOrder) {
     try {
       const segments = await fetchFromTrack(track, fetchImpl);
       if (segments.length > 0) {
@@ -362,6 +457,133 @@ export async function fetchTranscriptFromWatchPage(
       // try the next track
     }
   }
+  throw youtubeFailure('NO_TRANSCRIPT', 'no transcript available for this video');
+}
+
+interface PlayerInfo {
+  title: string;
+  durationSeconds: number | null;
+  tracks: CaptionTrack[];
+}
+
+interface PlayerResponseBody {
+  playabilityStatus?: { status?: string; reason?: string };
+  videoDetails?: { title?: string; lengthSeconds?: string };
+  captions?: { playerCaptionsTracklistRenderer?: { captionTracks?: CaptionTrack[] } };
+}
+
+async function fetchPlayerInfo(
+  videoId: string,
+  client: PlayerClient,
+  fetchImpl: FetchLike
+): Promise<PlayerInfo> {
+  const res = await fetchWithTimeout(PLAYER_ENDPOINT, FETCH_TIMEOUT_MS, fetchImpl, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'user-agent': client.userAgent,
+      'accept-language': 'en-US,en;q=0.9'
+    },
+    body: JSON.stringify({
+      context: {
+        client: {
+          clientName: client.name,
+          clientVersion: client.version,
+          hl: 'en',
+          gl: 'US',
+          ...client.extra
+        }
+      },
+      videoId
+    })
+  });
+  if (!res.ok) {
+    throw youtubeFailure('FETCH_FAILED', `video info request failed (${res.status})`);
+  }
+
+  let body: PlayerResponseBody;
+  try {
+    body = (await res.json()) as PlayerResponseBody;
+  } catch {
+    throw youtubeFailure('FETCH_FAILED', 'video info response was not valid JSON');
+  }
+
+  const status = body.playabilityStatus?.status;
+  if (status && status !== 'OK') {
+    const reason = body.playabilityStatus?.reason ?? '';
+    // "Sign in to confirm you're not a bot" is about this server's IP, not the
+    // video, so another client or strategy may still get the captions.
+    if (status === 'LOGIN_REQUIRED' || /not a bot|sign in to confirm/i.test(reason)) {
+      throw youtubeFailure('BOT_CHECK', reason || 'YouTube requires sign-in for this request');
+    }
+    throw youtubeFailure('NO_TRANSCRIPT', reason || 'video is not available for transcript extraction');
+  }
+
+  const length = Number(body.videoDetails?.lengthSeconds);
+  return {
+    title: body.videoDetails?.title?.trim() || 'YouTube video',
+    durationSeconds: Number.isFinite(length) && length > 0 ? length : null,
+    tracks: body.captions?.playerCaptionsTracklistRenderer?.captionTracks ?? []
+  };
+}
+
+/**
+ * Primary strategy: ask InnerTube's player endpoint as a mobile client. Its
+ * caption URLs are plain signed timedtext links, so they work from server
+ * egress instead of returning the web player's empty 200.
+ */
+export async function fetchTranscriptFromPlayer(
+  videoId: string,
+  options: { fetchImpl?: FetchLike; language?: string } = {}
+): Promise<FetchedTranscript> {
+  const fetchImpl = options.fetchImpl ?? (fetch as FetchLike);
+  const language = options.language ?? 'en';
+  let lastError: unknown;
+
+  for (const client of PLAYER_CLIENTS) {
+    let info: PlayerInfo;
+    try {
+      info = await fetchPlayerInfo(videoId, client, fetchImpl);
+    } catch (error) {
+      // "Private video", "removed", age-gated: the same answer from every
+      // client, so stop early. A bot check or a network failure may not be.
+      if ((error as { code?: string })?.code === 'NO_TRANSCRIPT') {
+        throw error;
+      }
+      lastError = error;
+      continue;
+    }
+
+    if (info.tracks.length === 0) {
+      lastError = youtubeFailure('NO_CAPTIONS', 'no transcript available for this video');
+      continue;
+    }
+
+    const headers = {
+      'user-agent': client.userAgent,
+      'accept-language': 'en-US,en;q=0.9'
+    };
+    const trackOrder = orderCaptionTracks(info.tracks, language).slice(0, MAX_TRACK_ATTEMPTS);
+    for (const track of trackOrder) {
+      try {
+        const segments = await fetchFromTrack(track, fetchImpl, headers);
+        if (segments.length > 0) {
+          return {
+            videoId,
+            title: info.title,
+            segments,
+            durationSeconds: info.durationSeconds ?? undefined
+          };
+        }
+      } catch {
+        // try the next track
+      }
+    }
+    lastError = youtubeFailure('NO_TRANSCRIPT', 'no transcript available for this video');
+  }
+
+  const code = (lastError as { code?: string } | undefined)?.code;
+  if (typeof code === 'string') throw lastError;
   throw youtubeFailure('NO_TRANSCRIPT', 'no transcript available for this video');
 }
 
@@ -456,21 +678,39 @@ async function fetchViaInnertube(videoId: string): Promise<FetchedTranscript> {
 }
 
 async function realFetchTranscript(videoId: string): Promise<FetchedTranscript> {
+  let primaryError: unknown;
+  try {
+    return await fetchTranscriptFromPlayer(videoId);
+  } catch (error) {
+    primaryError = error;
+    // A definite "this video is unavailable / has no transcript" answer is
+    // worth returning immediately; the watch page and youtubei.js would only
+    // repeat it. A bot check is about our IP, so keep falling back.
+    const code = (error as { code?: string })?.code;
+    if (code === 'NO_TRANSCRIPT') {
+      throw error;
+    }
+  }
+
   try {
     return await fetchTranscriptFromWatchPage(videoId);
-  } catch (primaryError) {
-    // The watch-page path is the reliable one; only fall back when it could
-    // not even read tracks, so a genuine no-captions result stays fast.
-    const code = (primaryError as { code?: string })?.code;
-    if (code !== 'FETCH_FAILED' && code !== 'NO_CAPTIONS') {
+  } catch (watchError) {
+    const watchCode = (watchError as { code?: string })?.code;
+    if (watchCode !== 'FETCH_FAILED' && watchCode !== 'NO_CAPTIONS') {
+      throw watchError;
+    }
+  }
+
+  try {
+    return await fetchViaInnertube(videoId);
+  } catch (fallbackError) {
+    // Prefer the bot-check answer: it is the one that tells the user what to do
+    // (YouTube is blocking this server, not the video).
+    if ((primaryError as { code?: string } | undefined)?.code === 'BOT_CHECK') {
       throw primaryError;
     }
-    try {
-      return await fetchViaInnertube(videoId);
-    } catch (fallbackError) {
-      const fallbackCode = (fallbackError as { code?: string })?.code;
-      throw fallbackCode ? fallbackError : primaryError;
-    }
+    const fallbackCode = (fallbackError as { code?: string })?.code;
+    throw fallbackCode ? fallbackError : primaryError;
   }
 }
 
@@ -479,9 +719,13 @@ const statusForCode: Record<string, number> = {
   NO_CAPTIONS: 502,
   EMPTY_RESPONSE: 502,
   FETCH_FAILED: 502,
+  BOT_CHECK: 502,
   TIMEOUT: 504,
   LIMIT_REACHED: 409
 };
+
+const BLOCKED_MESSAGE =
+  'YouTube is blocking transcript requests from this server right now. Open the video, copy its transcript, and add it with Paste text.';
 
 export async function youtubeSourceCreate(
   db: Client,
@@ -520,7 +764,8 @@ export async function youtubeSourceCreate(
 
     const fetched = await timedFetchTranscript(videoId, fetchTranscript);
     const lastStartMs = fetched.segments.reduce((max, segment) => Math.max(max, segment.startMs), 0);
-    const durationMin = Math.max(1, Math.round(lastStartMs / 60_000));
+    const durationSeconds = fetched.durationSeconds ?? lastStartMs / 1000;
+    const durationMin = Math.max(1, Math.round(durationSeconds / 60));
     const result = await ingestTextSource(db, {
       notebookId,
       title: fetched.title,
@@ -536,7 +781,10 @@ export async function youtubeSourceCreate(
   } catch (error) {
     const code = (error as { code?: unknown }).code;
     if (typeof code === 'string' && statusForCode[code]) {
-      const message = (error as Error).message || 'no transcript available for this video';
+      const message =
+        code === 'BOT_CHECK'
+          ? BLOCKED_MESSAGE
+          : (error as Error).message || 'no transcript available for this video';
       return NextResponse.json({ error: message, code }, { status: statusForCode[code]! });
     }
     return errorResponse(error);

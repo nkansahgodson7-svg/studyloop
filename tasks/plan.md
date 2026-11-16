@@ -56,13 +56,20 @@ exit criterion.
 - [x] Task 6: Notebooks CRUD per user + notebook list/switch UI (commit afe83dd)
 - [x] Task 7: Source ingest core — chunker + FTS5 indexing + text source (paste) (commit 242a20d)
 - [x] Task 8: PDF source — pdfjs client extraction → text payload → ingest core (commit ebd5e73)
-- [x] Task 9: YouTube source — URL → `youtubei.js` transcript → ingest core. LIVE fetch blocked 2026-10-24: YouTube times out datacenter egress (timedtext 200 + empty body for all formats; get_transcript 400 "Precondition check failed" = poToken guard, latest lib 18.3.0 included). DI fetcher design means the code path is fully testable and the UI degrades to a clear 502 banner; manual paste-transcript fallback is already available (Add a text source). Deployed egress may behave differently; revisit with PoToken/residential egress if needed.
+- [x] Task 9: YouTube source — URL → transcript → ingest core. Fixed 2026-11-15: the web player's caption URLs now carry `exp=xpe` (PoToken guard) and return an empty 200 outside a real browser, and `/youtubei/v1/get_transcript` returns 400 "Precondition check failed". Ingestion now asks InnerTube's `/youtubei/v1/player` as the iOS (then Android) client, whose caption URLs are plain signed timedtext links, then  fetches `fmt=json3`. The watch-page and `youtubei.js` paths remain as fallbacks. Client order is
+  IOS → ANDROID → ANDROID_VR → TVHTML5/embedded, and a `LOGIN_REQUIRED` bot check is
+  no longer terminal (it says the server IP is challenged, not that the video lacks
+  captions): the next client and fallbacks are tried, and only if all fail does the
+  route answer 502 `BOT_CHECK` with actionable copy (add the transcript via Paste
+  text). `/shorts/`, `/live/`, `/embed/`, `/v/` and `youtube-nocookie.com` URLs are
+  accepted. Live smoke passes for multiple public videos; DI fetcher tests cover the
+  parsers, client fallback, and failure codes.
 
 ### Checkpoint: Sources
 - [x] A notebook has a PDF, a paste, and a YouTube source path; FTS search returns
   the right chunks for keyword queries (tested — PDF E2E 'calvin' match 2026-10-24).
-  Deviation: live YouTube ingestion is blocked in this environment (see Task 9);
-  verified via DI-fetched unit tests + UI 502 degradation instead.
+  Live YouTube ingestion verified 2026-11-15 via the mobile-player caption
+  path (see Task 9).
 
 ### Phase 4: Grounded Chat
 
