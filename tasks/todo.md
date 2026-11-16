@@ -40,7 +40,11 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
   - Files: src/lib/server/ingest/*.ts + tests
 - [ ] Task 8: PDF source (client pdfjs → text)
   - Acceptance: ≤100-page PDF produces text source ≤ 30s
-- [x] Task 9: YouTube source (youtubei.js) — done 2026-10-24. Unit tests verify extraction (video-id parsing, transcript segments, mocked fetcher, 400/502/404 paths). Browser E2E: invalid URL surfaced (400), live video surfaced a clear "no transcript available" (502) because YouTube's timedtext + get_transcript are hardened against datacenter IPs (timedtext returns 200 w/ empty body; get_transcript 400 "Precondition check failed"). Code path + UI degrade gracefully; owner can still paste an auto transcript manually via Add a text source until deployed egress works.
+- [x] Task 9: YouTube source — done 2026-10-24, live path fixed 2026-11-15. The watch page's caption URLs now carry `exp=xpe` and return an empty 200, while `/youtubei/v1/get_transcript` is PoToken-gated (400 "Precondition check failed"). Ingestion now requests caption tracks from InnerTube's `/youtubei/v1/player` as the iOS/Android client and fetches the resulting plain timedtext URLs. Unit tests cover video-id parsing, the player request, json3/srv3/VTT parsers, and 400/502/404 paths; live smoke fetched real transcripts for multiple public videos.
+  - Hardened 2026-11-16: bot-check replies (`LOGIN_REQUIRED`) fall through to the
+    next player client instead of failing the request, the client list gained
+    ANDROID_VR/TVHTML5/WEB_EMBEDDED, extra URL shapes parse, and total failure
+    returns 502 BOT_CHECK pointing at Paste text.
   - Acceptance: URL → transcript source ≤ 60s (mocked test + one live smoke)
 
 ## Phase 4: Grounded Chat
@@ -57,8 +61,19 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
 
 ## Phase 6: Quiz
 
-- [ ] Task 14: Quiz generation (topic-scoped, streamed batches ≤ 6)
-- [ ] Task 15: Quiz play + AI grading (scores persisted)
+Spec: `tasks/quiz-spec.md` (confirmed 2026-11-16)- [x] Task 14: Quiz data layer + generation — new exam/item/attempt tables, shared
+  generation material, mixed-type batches ≤ 6 with a 40 s deadline — done
+  2026-11-16. `src/lib/server/{quiz,quiz-generate,quiz-prompt}.ts` + tests;
+  `generation-material.ts` extracted from `cards.ts`.
+  - Acceptance: 10-question mixed exam generated from a real PDF ≤ 40 s; item
+    validation drops malformed questions; dedupe; 502 when nothing valid
+- [x] Task 15: Quiz play + AI grading — one active attempt per exam, resume,
+  timer auto-submit, partial-credit AI grading for short answers, results +
+  breakdown + missed→flashcards — done 2026-11-16. `quiz-grade.ts`, `quiz-api.ts`,
+  routes under `/api/quizzes*` + `/api/quiz-attempts*`, Quiz tab + exam/take/
+  results screens, Home/Review latest score.
+  - Acceptance: take → submit → score; retake shuffles options only; timer
+    auto-submits with unanswered = 0; grading failure never loses the attempt
 
 ## Phase 7: Ship
 

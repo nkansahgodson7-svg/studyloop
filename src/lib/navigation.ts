@@ -10,7 +10,10 @@ export function rootPath(pathname: string): string {
 export function routeDepth(pathname: string): number {
   const path = rootPath(pathname);
   if (path === "/login" || path === "/signup") return 0;
-  if (path.startsWith("/notebooks/") && path !== "/notebooks/") return 2;
+  if (path.startsWith("/notebooks/") && path !== "/notebooks/") {
+    // A mock exam is a child of the notebook, one level below its tabs.
+    return /\/quiz\//.test(path) ? 3 : 2;
+  }
   if (path.startsWith("/review/session")) return 3;
   if (path === "/" || path === "/review" || path === "/library" || path === "/settings") return 1;
   if (path === "/notebooks") return 1;
@@ -41,6 +44,9 @@ const TITLES: Array<[RegExp, string]> = [
   [/\/onboarding$/, "Set up your AI key"],
   [/\/admin$/, "Admin dashboard"],
   [/\/review\/session/, "Review session"],
+  [/\/quiz\/[^/]+\/results/, "Exam results"],
+  [/\/quiz\/[^/]+\/take/, "Mock exam"],
+  [/\/quiz\//, "Mock exam"],
   [/\/notebooks\/[^/]+$/, "Notebook"],
   [/\/review$/, "Review"],
   [/\/library$/, "Library"],

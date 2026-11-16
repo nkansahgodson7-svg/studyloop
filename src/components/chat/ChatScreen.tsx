@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "@/components/ui/icons";
+import { GenerationProgress } from "@/components/ui/GenerationProgress";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { useSheet } from "@/components/ui/Sheet";
 import { authRedirectFor } from "@/lib/client/api";
@@ -35,6 +36,7 @@ interface StreamState {
   text: string;
   grounding: Grounding | null;
   sources: ChatSourceRef[];
+  quiz: { written: number; total: number } | null;
 }
 
 interface TurnError {
@@ -87,6 +89,7 @@ export default function ChatScreen({
   const [stream, setStream] = useState<StreamState | null>(null);
   const [turnError, setTurnError] = useState<TurnError | null>(null);
   const [atBottom, setAtBottom] = useState(true);
+  const [quizElapsed, setQuizElapsed] = useState(0);
 
   const rootRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +205,21 @@ export default function ChatScreen({
     };
   }, [chatId, notebookId, router, seed]);
 
+  const quizGenerating = Boolean(stream?.quiz);
+
+  // The quiz generates in one long pass; this clock only proves the wait is
+  // moving, while the counts come from real server events.
+  useEffect(() => {
+    if (!quizGenerating) return;
+    setQuizElapsed(0);
+    const startedAt = Date.now();
+    const timer = setInterval(
+      () => setQuizElapsed(Math.floor((Date.now() - startedAt) / 1000)),
+      1000
+    );
+    return () => clearInterval(timer);
+  }, [quizGenerating]);
+
   useEffect(() => {
     const scroller = rootRef.current?.closest(".screen") as HTMLElement | null;
     if (!scroller) return;
@@ -244,7 +262,7 @@ export default function ChatScreen({
     setTurnError(null);
     stickRef.current = true;
     setAtBottom(true);
-    setStream({ ...seed, text: "", grounding: null, sources: [] });
+    setStream({ ...seed, text: "", grounding: null, sources: [], quiz: null });
     let userId = seed.userMessageId;
 
     try {
@@ -257,7 +275,9 @@ export default function ChatScreen({
           onGrounding: (label, sources) =>
             setStream((prev) => (prev ? { ...prev, grounding: label, sources } : prev)),
           onDelta: (text) =>
-            setStream((prev) => (prev ? { ...prev, text: prev.text + text } : prev))
+            setStream((prev) => (prev ? { ...prev, text: prev.text + text } : prev)),
+          onQuizProgress: (written, total) =>
+            setStream((prev) => (prev ? { ...prev, quiz: { written, total } } : prev))
         },
         controller.signal
       );
@@ -362,10 +382,10 @@ export default function ChatScreen({
   }
 
   const backHref = `/notebooks/${notebookId}?tab=chat`;
-  const goBack = useSmartBack(
-    backHref,
-    (from) => from === `/notebooks/${notebookId}` || from.startsWith(`/notebooks/${notebookId}/chat/`)
-  );
+  // Only the notebook itself is a real origin. Another chat is a sibling, not a
+  // parent, so honouring it here sent back through every chat the user had
+  // opened; the notebook (chat tab) is always the destination instead.
+  const goBack = useSmartBack(backHref, (from) => from === `/notebooks/${notebookId}`);
 
   if (missing) {
     return (
@@ -510,25 +530,54 @@ export default function ChatScreen({
                     grounding: null,
                     sources: [],
                     status: "complete",
+                    quizExamId: null,
                     createdAt: new Date().toISOString()
                   }}
                   busy
                 />
               ) : null}
-              <MessageBubble
-                message={{
-                  id: -2,
-                  conversationId: conversation.id,
-                  role: "assistant",
-                  content: stream.text,
-                  grounding: stream.grounding,
-                  sources: stream.sources,
-                  status: "complete",
-                  createdAt: new Date().toISOString()
-                }}
-                streaming
-                busy
-              />
+              {stream.quiz ? (
+                <div className="chat-quiz-pending">
+                  <GenerationProgress
+                    title="Writing your quiz"
+                    unit="questions"
+                    written={stream.quiz.written}
+                    total={stream.quiz.total}
+                    elapsedSeconds={quizElapsed}
+                    indeterminate={stream.quiz.written === 0}
+                    steps={[
+                      { label: "Read your sources", state: "done" },
+                      {
+                        label: "Write the questions",
+                        state:
+                          stream.quiz.written >= stream.quiz.total ? "done" : "active"
+                      },
+                      {
+                        label: "Save the quiz",
+                        state:
+                          stream.quiz.written >= stream.quiz.total ? "active" : "waiting"
+                      }
+                    ]}
+                    hint="Answer it right here — it’s saved in the Quiz tab too."
+                  />
+                </div>
+              ) : (
+                <MessageBubble
+                  message={{
+                    id: -2,
+                    conversationId: conversation.id,
+                    role: "assistant",
+                    content: stream.text,
+                    grounding: stream.grounding,
+                    sources: stream.sources,
+                    status: "complete",
+                    quizExamId: null,
+                    createdAt: new Date().toISOString()
+                  }}
+                  streaming
+                  busy
+                />
+              )}
             </>
           ) : null}
 

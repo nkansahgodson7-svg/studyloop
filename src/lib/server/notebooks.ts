@@ -45,11 +45,38 @@ export async function listNotebooks(db: Client, userId: number): Promise<Noteboo
   return result.rows.map(rowToNotebook);
 }
 
+export interface LastQuiz {
+  examId: number;
+  title: string;
+  score: number;
+  at: string;
+}
+
 export interface NotebookViewRow {
   notebook: NotebookRow;
   sources: number;
   cards: number;
   due: number;
+  lastQuiz: { examId: number; score: number; at: string } | null;
+}
+
+/** The most recently graded attempt in a notebook, for "latest score" display. */
+export async function lastQuizForNotebook(db: Client, notebookId: number): Promise<LastQuiz | null> {
+  const result = await db.execute({
+    sql: `SELECT a.exam_id, a.score, a.submitted_at, e.title
+            FROM quiz_exam_attempts a JOIN quiz_exams e ON e.id = a.exam_id
+           WHERE e.notebook_id = ? AND a.status = 'graded' AND a.score IS NOT NULL
+           ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1`,
+    args: [notebookId]
+  });
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    examId: Number(row.exam_id),
+    title: String(row.title),
+    score: Number(row.score),
+    at: String(row.submitted_at ?? '')
+  };
 }
 
 export async function listNotebookViews(
@@ -64,7 +91,19 @@ export async function listNotebookViews(
                  (SELECT COUNT(*) FROM sources s WHERE s.notebook_id = nb.id) AS sources,
                  (SELECT COUNT(*) FROM cards c WHERE c.notebook_id = nb.id) AS cards,
                  (SELECT COUNT(*) FROM cards c JOIN reviews r ON r.card_id = c.id
-                   WHERE c.notebook_id = nb.id AND r.due <= ?) AS due
+                   WHERE c.notebook_id = nb.id AND r.due <= ?) AS due,
+                 (SELECT a.exam_id FROM quiz_exam_attempts a
+                    JOIN quiz_exams e ON e.id = a.exam_id
+                   WHERE e.notebook_id = nb.id AND a.status = 'graded'
+                   ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1) AS last_quiz_exam,
+                 (SELECT a.score FROM quiz_exam_attempts a
+                    JOIN quiz_exams e ON e.id = a.exam_id
+                   WHERE e.notebook_id = nb.id AND a.status = 'graded'
+                   ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1) AS last_quiz_score,
+                 (SELECT a.submitted_at FROM quiz_exam_attempts a
+                    JOIN quiz_exams e ON e.id = a.exam_id
+                   WHERE e.notebook_id = nb.id AND a.status = 'graded'
+                   ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1) AS last_quiz_at
           FROM notebooks nb
           WHERE nb.user_id = ?
           ORDER BY nb.created_at DESC, nb.id DESC`,
@@ -74,7 +113,15 @@ export async function listNotebookViews(
     notebook: rowToNotebook(row),
     sources: Number(row.sources),
     cards: Number(row.cards),
-    due: Number(row.due)
+    due: Number(row.due),
+    lastQuiz:
+      row.last_quiz_exam == null || row.last_quiz_score == null
+        ? null
+        : {
+            examId: Number(row.last_quiz_exam),
+            score: Number(row.last_quiz_score),
+            at: String(row.last_quiz_at ?? '')
+          }
   }));
 }
 

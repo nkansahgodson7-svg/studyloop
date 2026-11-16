@@ -314,7 +314,7 @@ export async function computeAdminStats(db: Client): Promise<AdminStats> {
                   SELECT se.user_id AS uid, se.created_at AS ts
                     FROM sessions se WHERE se.created_at IS NOT NULL
                   UNION ALL
-                  SELECT qa.user_id AS uid, qa.created_at AS ts FROM quiz_attempts qa
+                  SELECT qa.user_id AS uid, qa.started_at AS ts FROM quiz_exam_attempts qa
                 ) events
               GROUP BY events.uid
             ),

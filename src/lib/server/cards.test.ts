@@ -313,6 +313,36 @@ describe('cards handlers', () => {
     expect(listBody.cards.map((card) => card.front)).not.toContain('G1');
   });
 
+  it('reports the real phases for the streaming route', async () => {
+    const events: string[] = [];
+    const res = await cardsGenerate(
+      db,
+      makeRequest(
+        `http://x/api/notebooks/${notebookId}/cards/generate`,
+        JSON.stringify({ sources: [{ sourceId }], count: 3 }),
+        token
+      ),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'mock-key',
+        completeBatch: async () =>
+          JSON.stringify([
+            { front: 'Stream card one', back: 'Answer one' },
+            { front: 'Stream card two', back: 'Answer two' },
+            { front: 'Stream card three', back: 'Answer three' }
+          ]),
+        onEvent: (event) => {
+          if (event.type === 'done') events.push(`done:${event.drafts.length}`);
+          else if (event.type === 'progress') events.push(`progress:${event.drafted}/${event.total}`);
+          else if (event.type === 'prepared') events.push(`prepared:${event.total}`);
+          else events.push('checking');
+        }
+      }
+    );
+    expect(res.status).toBe(200);
+    expect(events).toEqual(['prepared:3', 'checking', 'progress:3/3', 'done:3']);
+  });
+
   it('deduplicates in-batch and against existing notebook cards', async () => {
     await cardsAdd(
       db,

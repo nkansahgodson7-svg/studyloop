@@ -864,6 +864,18 @@ picture {
   padding: 8px 12px;
 }
 
+/* Screens whose primary action lives in the bar keep it reachable while the
+   content beneath scrolls (the quiz overview's attempt list). The negative
+   margin pulls the paper under the safe area, which the screen already pads. */
+.topbar--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  padding-top: calc(8px + env(safe-area-inset-top));
+  margin-top: calc(-1 * env(safe-area-inset-top));
+  background: var(--paper);
+}
+
 .topbar__title {
   font-size: 15px;
   font-weight: 550;
@@ -2383,6 +2395,131 @@ picture {
   width: 15px;
   height: 15px;
   color: var(--brand);
+}
+
+/* Generating a mock exam: the meter and counts mirror real server batches,
+   the clock only proves the wait is moving. */
+.gen {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+
+.gen__head {
+  display: grid;
+  gap: 6px;
+}
+
+.gen__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+.gen__meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.gen__clock {
+  color: var(--muted);
+}
+
+.gen__meter {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.gen__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  transition: width 320ms var(--ease-out);
+}
+
+.gen__meter.is-indeterminate .gen__fill {
+  width: 38%;
+  animation: gen-sweep 1.5s var(--ease-out) infinite;
+}
+
+@keyframes gen-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
+.gen__steps {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gen__step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 12.5px;
+  line-height: 1.35;
+  color: var(--muted);
+}
+
+.gen__dot {
+  width: 15px;
+  height: 15px;
+  margin-top: 1px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--line-strong);
+  color: var(--surface);
+}
+
+.gen__step.is-active {
+  color: var(--ink);
+}
+
+.gen__step.is-active .gen__dot {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+  animation: gen-pulse 1.6s ease-in-out infinite;
+}
+
+.gen__step.is-done {
+  color: var(--ink-2);
+}
+
+.gen__step.is-done .gen__dot {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+
+@keyframes gen-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.82);
+  }
 }
 
 .spinner {
@@ -4731,6 +4868,281 @@ picture {
 
 .chat-jump__icon {
   transform: rotate(90deg);
+}
+
+/* A quiz generated inside a chat answer. The card carries its own progress,
+   options, and result so answering never leaves the thread. */
+
+.chat-quiz {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.chat-quiz__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-quiz__eyebrow {
+  margin-bottom: 2px;
+  color: var(--muted);
+  font-size: 10.5px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.chat-quiz__title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 550;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.chat-quiz__meta {
+  flex: none;
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-quiz__progress {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-quiz__progressRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.chat-quiz__bar {
+  height: 5px;
+  overflow: hidden;
+  border-radius: var(--r-pill);
+  background: var(--line);
+}
+
+.chat-quiz__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  transition: width 220ms var(--ease-out);
+}
+
+.chat-quiz__question {
+  display: grid;
+}
+
+.chat-quiz__prompt {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.32;
+}
+
+.chat-quiz__prompt p {
+  margin: 0;
+}
+
+.chat-quiz__options {
+  display: grid;
+  gap: 8px;
+}
+
+.chat-quiz__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  color: var(--ink);
+  text-align: left;
+  line-height: 1.35;
+  cursor: pointer;
+}
+
+.chat-quiz__option span:first-child {
+  flex: 1;
+}
+
+.chat-quiz__option:hover {
+  background: var(--surface-2);
+}
+
+.chat-quiz__option.is-selected {
+  border-color: var(--brand);
+  background: var(--brand-soft);
+  box-shadow: 0 0 0 1px var(--brand) inset;
+}
+
+.chat-quiz__option svg {
+  color: var(--brand);
+}
+
+.chat-quiz__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.chat-quiz__score {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--brand-soft);
+}
+
+.chat-quiz__scoreValue {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 550;
+  line-height: 1;
+  color: var(--brand);
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-quiz__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.chat-quiz__toggle:hover {
+  background: var(--surface-2);
+}
+
+.chat-quiz__toggle svg {
+  color: var(--muted);
+  transition: transform 0.18s var(--ease-out);
+}
+
+.chat-quiz__toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.chat-quiz__review {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-quiz__reviewItem {
+  display: grid;
+  gap: 6px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.chat-quiz__reviewItem:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.chat-quiz__reviewHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.chat-quiz__mark {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 1px;
+  border-radius: 50%;
+}
+
+.chat-quiz__mark.is-correct {
+  background: var(--brand);
+  color: var(--surface);
+}
+
+.chat-quiz__mark.is-wrong {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chat-quiz__reviewPrompt {
+  color: var(--ink);
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.chat-quiz__reviewPrompt p {
+  margin: 0;
+}
+
+.chat-quiz__reviewPrompt .md {
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  font-weight: 550;
+  line-height: 1.4;
+}
+
+.chat-quiz__answer {
+  padding-left: 29px;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.chat-quiz__explain {
+  padding-left: 29px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.chat-quiz__skeleton {
+  height: 54px;
+  border-radius: 12px;
+  background: var(--paper-2);
+}
+
+.chat-quiz__skeleton--short {
+  height: 16px;
+  width: 58%;
+}
+
+.chat-quiz-pending {
+  margin-top: 2px;
 }
 
 /* Chat list and drawer */

@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   grounding TEXT CHECK (grounding IN ('sources', 'general', 'mixed')),
   sources TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'stopped', 'error')),
+  quiz_exam_id INTEGER REFERENCES quiz_exams(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -189,7 +190,50 @@ CREATE TABLE IF NOT EXISTS quiz_attempts (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
+CREATE TABLE IF NOT EXISTS quiz_exams (
+  id INTEGER PRIMARY KEY,
+  notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  topic TEXT NOT NULL DEFAULT '',
+  config TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS quiz_exam_items (
+  id INTEGER PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES quiz_exams(id) ON DELETE CASCADE,
+  ord INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('mcq', 'multi', 'truefalse', 'fillin', 'short')),
+  topic TEXT NOT NULL DEFAULT '',
+  prompt TEXT NOT NULL,
+  options TEXT NOT NULL DEFAULT '[]',
+  correct TEXT NOT NULL,
+  explanation TEXT NOT NULL DEFAULT '',
+  source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS quiz_exam_attempts (
+  id INTEGER PRIMARY KEY,
+  exam_id INTEGER NOT NULL REFERENCES quiz_exams(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'in_progress'
+    CHECK (status IN ('in_progress', 'submitted', 'grading', 'graded', 'grading_failed')),
+  answers TEXT NOT NULL DEFAULT '{}',
+  started_at TEXT NOT NULL,
+  submitted_at TEXT,
+  graded_at TEXT,
+  duration_ms INTEGER,
+  score REAL,
+  feedback TEXT,
+  breakdown TEXT,
+  graded_by TEXT NOT NULL DEFAULT 'auto'
+);
+
 CREATE INDEX IF NOT EXISTS idx_sources_notebook ON sources(notebook_id);
+CREATE INDEX IF NOT EXISTS idx_quiz_exams_notebook ON quiz_exams(notebook_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quiz_exam_items_exam ON quiz_exam_items(exam_id, ord);
+CREATE INDEX IF NOT EXISTS idx_quiz_exam_attempts_exam ON quiz_exam_attempts(exam_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_quiz_exam_attempts_user ON quiz_exam_attempts(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_conversations_notebook ON chat_conversations(notebook_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_cards_notebook ON cards(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
@@ -245,6 +289,7 @@ async function rebuildChatTablesOnce(db: Client): Promise<void> {
       grounding TEXT CHECK (grounding IN ('sources', 'general', 'mixed')),
       sources TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'stopped', 'error')),
+      quiz_exam_id INTEGER REFERENCES quiz_exams(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, id);
@@ -296,6 +341,13 @@ export async function applySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute('ALTER TABLE users ADD COLUMN password_expires_at TEXT');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute(
+      'ALTER TABLE chat_messages ADD COLUMN quiz_exam_id INTEGER REFERENCES quiz_exams(id) ON DELETE SET NULL'
+    );
   } catch {
     // column already exists
   }

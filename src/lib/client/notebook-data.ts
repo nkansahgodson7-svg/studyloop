@@ -32,12 +32,20 @@ export interface NotebookBatch {
   cardCount: number;
 }
 
+export interface NotebookLastQuiz {
+  examId: number;
+  title: string;
+  score: number;
+  at: string;
+}
+
 export interface NotebookBundle {
   id: number;
   title: string;
   sources: NotebookSource[];
   cards: NotebookCard[];
   batches: NotebookBatch[];
+  lastQuiz?: NotebookLastQuiz | null;
 }
 
 const BUNDLE_TTL_MS = 30_000;
@@ -83,6 +91,11 @@ export async function loadNotebook(
     });
   inflightBundles.set(id, request);
   return request;
+}
+
+/** Drop a cached bundle so the next read refetches (e.g. after an exam score changes). */
+export function invalidateNotebook(id: number): void {
+  bundleCache.delete(id);
 }
 
 export function dueCount(cards: NotebookCard[], now = Date.now()): number {

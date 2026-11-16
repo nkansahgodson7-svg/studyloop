@@ -13,6 +13,8 @@ export const LLM_CHAT_LIMIT = { max: 150, windowMs: HOUR_MS };
 export const LLM_GENERATE_LIMIT = { max: 30, windowMs: HOUR_MS };
 export const INGEST_LIMIT = { max: 20, windowMs: HOUR_MS };
 export const YOUTUBE_INGEST_LIMIT = { max: 10, windowMs: HOUR_MS };
+export const QUIZ_GENERATE_LIMIT = { max: 20, windowMs: HOUR_MS };
+export const QUIZ_GRADE_LIMIT = { max: 60, windowMs: HOUR_MS };
 
 export interface RateLimitResult {
   allowed: boolean;

@@ -92,6 +92,7 @@ export default function ReviewPage() {
                       <span className="row__title">{view.notebook.title}</span>
                       <span className="row__meta">
                         {plural(view.cards, "card")}
+                        {view.lastQuiz ? ` · mock ${Math.round(view.lastQuiz.score * 100)}%` : ""}
                       </span>
                     </span>
                     <span className="row__trail">
