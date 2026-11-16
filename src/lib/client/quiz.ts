@@ -65,6 +65,22 @@ export interface QuizGenerateInput {
   focus?: string;
 }
 
+export type QuizGenerationPhase = 'reading' | 'writing' | 'saving';
+
+export interface QuizGenerationProgress {
+  phase: QuizGenerationPhase;
+  written: number;
+  total: number;
+}
+
+export interface QuizGenerateResult {
+  exam: QuizDetailResponse['exam'];
+  items: QuizPublicItem[];
+  requested: number;
+  generated: number;
+  truncated: boolean;
+}
+
 async function send<T>(url: string, init: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -98,18 +114,107 @@ export function getQuiz(examId: number): Promise<QuizDetailResponse> {
   return send(`/api/quizzes/${examId}`, { method: "GET" });
 }
 
-export function generateQuiz(notebookId: number, input: QuizGenerateInput): Promise<{
-  exam: QuizDetailResponse["exam"];
-  items: QuizPublicItem[];
-  requested: number;
-  generated: number;
-  truncated: boolean;
-}> {
-  return send(`/api/notebooks/${notebookId}/quizzes/generate`, {
+export async function generateQuiz(
+  notebookId: number,
+  input: QuizGenerateInput,
+  onProgress?: (progress: QuizGenerationProgress) => void
+): Promise<QuizGenerateResult> {
+  const res = await fetch(`/api/notebooks/${notebookId}/quizzes/generate`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { accept: "application/x-ndjson", "content-type": "application/json" },
     body: JSON.stringify(input)
   });
+
+  if (!res.ok) {
+    let message = `Request failed: ${res.status}`;
+    let code: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: string; code?: string };
+      if (body?.error) message = body.error;
+      code = body?.code;
+    } catch {
+      // Non-JSON error bodies fall back to the generic message.
+    }
+    throw Object.assign(new Error(message), { status: res.status, code });
+  }
+
+  // A proxy or older deployment may answer with plain JSON; accept both.
+  if (!(res.headers.get("content-type") ?? "").includes("application/x-ndjson")) {
+    return (await res.json()) as QuizGenerateResult;
+  }
+  if (!res.body) {
+    throw new Error("Generation ended unexpectedly — try again.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: QuizGenerateResult | null = null;
+  let failure: Error | null = null;
+
+  const handleLine = (line: string) => {
+    if (line.trim().length === 0) return;
+    const event = JSON.parse(line) as {
+      type: string;
+      status?: number;
+      error?: string;
+      code?: string;
+      retryAfter?: string | null;
+      written?: number;
+      total?: number;
+      requested?: number;
+      generated?: number;
+      exam?: QuizGenerateResult["exam"];
+      items?: QuizPublicItem[];
+      truncated?: boolean;
+    };
+    if (event.type === "prepared") {
+      onProgress?.({ phase: "writing", written: 0, total: event.total ?? input.count });
+    } else if (event.type === "progress") {
+      onProgress?.({
+        phase: "writing",
+        written: event.written ?? 0,
+        total: event.total ?? input.count
+      });
+    } else if (event.type === "done") {
+      onProgress?.({
+        phase: "saving",
+        written: event.generated ?? 0,
+        total: event.requested ?? input.count
+      });
+      result = {
+        exam: event.exam as QuizGenerateResult["exam"],
+        items: event.items ?? [],
+        requested: event.requested ?? input.count,
+        generated: event.generated ?? 0,
+        truncated: Boolean(event.truncated)
+      };
+    } else if (event.type === "error") {
+      const status = event.status ?? 500;
+      const message =
+        status === 429 && event.retryAfter
+          ? `Too many requests — try again in ${event.retryAfter}s.`
+          : event.error ?? "Generation failed — try again.";
+      failure = Object.assign(new Error(message), { status, code: event.code });
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let newline = buffer.indexOf("\n");
+    while (newline >= 0) {
+      handleLine(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf("\n");
+    }
+  }
+  handleLine(buffer + decoder.decode());
+
+  if (failure) throw failure;
+  if (!result) throw new Error("Generation ended unexpectedly — try again.");
+  return result;
 }
 
 export function deleteQuiz(examId: number): Promise<{ deleted: boolean }> {

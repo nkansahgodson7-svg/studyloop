@@ -76,8 +76,13 @@ export default function ExamListPanel({
           <p className="h3">{exams ? plural(exams.length, "mock exam") : "Mock exams"}</p>
           <p className="small muted">Exam-mode practice with a score and topic breakdown</p>
         </div>
-        <button className="btn btn--sm btn--primary" type="button" onClick={openGenerate}>
-          <Icon name="sparkle" size={15} className="i-sparkle" /> New
+        <button
+          className="btn btn--sm btn--primary"
+          type="button"
+          onClick={openGenerate}
+          style={{ flex: "none", whiteSpace: "nowrap" }}
+        >
+          <Icon name="plus" size={15} /> New exam
         </button>
       </div>
 
@@ -99,7 +104,7 @@ export default function ExamListPanel({
             Generate one from your sources: questions, a timer if you want it, and a graded review at the end.
           </p>
           <button className="btn btn--primary btn--sm" type="button" onClick={openGenerate}>
-            <Icon name="sparkle" size={15} className="i-sparkle" /> Generate a mock exam
+            Generate a mock exam
           </button>
         </div>
       ) : (

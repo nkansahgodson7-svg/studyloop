@@ -219,10 +219,25 @@ async function groqQuizBatch(apiKey: string, system: string, user: string): Prom
   }
 }
 
+export type QuizGenerateEvent =
+  | { type: 'prepared'; total: number; sources: number }
+  | { type: 'progress'; written: number; total: number }
+  | {
+      type: 'done';
+      exam: unknown;
+      items: unknown[];
+      requested: number;
+      generated: number;
+      truncated: boolean;
+      failedBatches: number;
+    };
+
 interface QuizGenerateDeps {
   resolveLlmKey?: typeof resolveLlmKey;
   completeBatch?: (apiKey: string, system: string, user: string) => Promise<string>;
   deadlineMs?: number;
+  /** Real progress for the streaming route; nothing is emitted when omitted. */
+  onEvent?: (event: QuizGenerateEvent) => void;
 }
 
 function titleFor(focus: string, sourceSummary: string): string {
@@ -331,6 +346,7 @@ export async function quizGenerate(
     if (!built) {
       return NextResponse.json({ error: 'no source material found for that selection' }, { status: 400 });
     }
+    deps.onEvent?.({ type: 'prepared', total: count, sources: selections.length });
 
     const complete =
       deps.completeBatch ??
@@ -391,6 +407,7 @@ export async function quizGenerate(
       }
 
       failedBatches = 0;
+      const before = accepted.length;
       for (const item of parsed.items) {
         const quota = remaining[item.kind] ?? 0;
         if (quota <= 0) continue;
@@ -400,6 +417,9 @@ export async function quizGenerate(
         remaining[item.kind] = quota - 1;
         accepted.push({ ...item, sourceId: singleSourceId });
         if (accepted.length >= count) break;
+      }
+      if (accepted.length > before) {
+        deps.onEvent?.({ type: 'progress', written: accepted.length, total: count });
       }
     }
 
@@ -421,17 +441,16 @@ export async function quizGenerate(
       items: accepted
     });
 
-    return NextResponse.json(
-      {
-        exam: created.exam,
-        items: created.items.map(publicItem),
-        requested: count,
-        generated: accepted.length,
-        truncated: accepted.length < count,
-        failedBatches
-      },
-      { status: 201 }
-    );
+    const payload = {
+      exam: created.exam,
+      items: created.items.map(publicItem),
+      requested: count,
+      generated: accepted.length,
+      truncated: accepted.length < count,
+      failedBatches
+    };
+    deps.onEvent?.({ type: 'done', ...payload });
+    return NextResponse.json(payload, { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }

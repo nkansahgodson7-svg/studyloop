@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { Icon } from "@/components/ui/icons";
 import { getJson } from "@/lib/client/api";
-import { generateQuiz } from "@/lib/client/quiz";
+import { generateQuiz, type QuizGenerationPhase } from "@/lib/client/quiz";
 import type { NotebookSource } from "@/lib/client/notebook-data";
 import {
   QUIZ_COUNTS,
@@ -21,6 +21,27 @@ interface DetectedChapter {
 }
 
 const DEFAULT_TYPES: QuizKind[] = ["mcq", "multi", "truefalse", "fillin"];
+
+function clock(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+}
+
+function Step({
+  state,
+  children
+}: {
+  state: "done" | "active" | "waiting";
+  children: ReactNode;
+}) {
+  return (
+    <li className={`gen__step is-${state}`} aria-current={state === "active" ? "step" : undefined}>
+      <span className="gen__dot" aria-hidden="true">
+        {state === "done" ? <Icon name="check" size={11} /> : null}
+      </span>
+      <span>{children}</span>
+    </li>
+  );
+}
 
 export default function GenerateExamSheetContent({
   notebookId,
@@ -42,6 +63,25 @@ export default function GenerateExamSheetContent({
   const [focus, setFocus] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<QuizGenerationPhase | null>(null);
+  const [written, setWritten] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  // The clock only exists so a 40-second wait does not look frozen; the bar and
+  // counts below come from real server events.
+  useEffect(() => {
+    if (!busy) return;
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+
+  // The form scrolls; a failure must be visible without hunting for it.
+  useEffect(() => {
+    if (!error) return;
+    document.getElementById("generateExamForm")?.scrollTo({ top: 0 });
+  }, [error]);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,21 +141,73 @@ export default function GenerateExamSheetContent({
 
     setBusy(true);
     setError(null);
+    setPhase("reading");
+    setWritten(0);
+    setProgressTotal(count);
+    setElapsed(0);
     try {
-      const created = await generateQuiz(notebookId, {
-        sources: body,
-        types: QUIZ_KINDS.filter((kind) => types.has(kind)),
-        count,
-        timerMinutes: timed ? minutes : null,
-        focus: focus.trim() || undefined
-      });
+      const created = await generateQuiz(
+        notebookId,
+        {
+          sources: body,
+          types: QUIZ_KINDS.filter((kind) => types.has(kind)),
+          count,
+          timerMinutes: timed ? minutes : null,
+          focus: focus.trim() || undefined
+        },
+        (progress) => {
+          setPhase(progress.phase);
+          setWritten(progress.written);
+          setProgressTotal(progress.total);
+        }
+      );
       onCreated(created.exam.id);
     } catch (err) {
-      setError((err as Error).message);
+      const status = (err as { status?: number }).status;
+      setError(status ? (err as Error).message : "Network error — try again.");
+      setPhase(null);
     } finally {
       setBusy(false);
     }
   }
+
+  const writtenPct =
+    progressTotal > 0 ? Math.min(100, Math.round((written / progressTotal) * 100)) : 0;
+
+  const progressBody = (
+    <div className="gen">
+      <div className="gen__head">
+        <p className="gen__title">Writing your exam</p>
+        <div className="gen__meta">
+          <span>
+            {written} of {progressTotal || count} questions
+          </span>
+          <span className="gen__clock">{clock(elapsed)}</span>
+        </div>
+      </div>
+      <div
+        className="gen__meter"
+        role="progressbar"
+        aria-label="Questions written"
+        aria-valuemin={0}
+        aria-valuemax={progressTotal || count}
+        aria-valuenow={written}
+      >
+        <span className="gen__fill" style={{ width: `${writtenPct}%` }} />
+      </div>
+      <p className="sr-only" role="status">
+        {written} of {progressTotal || count} questions written
+      </p>
+      <ol className="gen__steps">
+        <Step state={phase === "reading" ? "active" : "done"}>Read the selected sources</Step>
+        <Step state={phase === "writing" ? "active" : phase === "saving" ? "done" : "waiting"}>
+          Write and check the questions
+        </Step>
+        <Step state={phase === "saving" ? "active" : "waiting"}>Save the exam</Step>
+      </ol>
+      <p className="hint">Usually 15–30 seconds. The exam is saved as soon as it is ready.</p>
+    </div>
+  );
 
   return (
     <SheetFrame
@@ -124,7 +216,14 @@ export default function GenerateExamSheetContent({
       formId="generateExamForm"
       onSubmit={() => void submit()}
       body={
+        busy ? progressBody : (
         <div className="stack--16">
+          {error ? (
+            <p className="form-error" role="alert">
+              {error}
+            </p>
+          ) : null}
+
           <div className="field">
             <span className="label">Sources</span>
             <div className="stack--8">
@@ -250,40 +349,40 @@ export default function GenerateExamSheetContent({
             />
           </div>
 
-          {error ? (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          ) : null}
-
-          {busy ? (
-            <div className="processing">
-              <div className="processing__row">
-                <span className="spinner" /> Writing questions — this can take up to 40 seconds
-              </div>
-              <div className="processing__row">
-                <Icon name="check" size={15} /> The exam is saved when it finishes
-              </div>
-            </div>
-          ) : null}
         </div>
+        )
       }
       foot={
         <>
-          <button className="btn btn--primary btn--block" type="submit" disabled={busy} aria-busy={busy}>
+          <button
+            className="btn btn--primary btn--block"
+            type="submit"
+            form="generateExamForm"
+            disabled={busy}
+            aria-busy={busy ? true : undefined}
+          >
             {busy ? (
               <>
-                <span className="spinner" /> Working…
+                <span className="spinner" />
+                {phase === "reading"
+                  ? "Reading sources…"
+                  : phase === "saving"
+                    ? "Saving exam…"
+                    : "Writing questions…"}
               </>
+            ) : error ? (
+              "Try again"
             ) : (
-              <>
-                <Icon name="sparkle" size={16} className="i-sparkle" /> Generate exam
-              </>
+              `Generate ${count} questions`
             )}
           </button>
-          <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>
-            Cancel
-          </button>
+          {busy ? (
+            <p className="tiny muted center">Keep this sheet open — the exam opens when it is ready.</p>
+          ) : (
+            <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={close}>
+              Cancel
+            </button>
+          )}
         </>
       }
     />

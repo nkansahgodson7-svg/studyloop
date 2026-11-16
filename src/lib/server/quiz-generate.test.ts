@@ -233,6 +233,38 @@ describe('quizGenerate()', () => {
     expect(stored.some((item) => item.kind === 'mcq' && item.correct)).toBe(true);
   });
 
+  it('reports real progress as batches are accepted', async () => {
+    const events: string[] = [];
+    let calls = 0;
+    const res = await quizGenerate(
+      db,
+      request({ sources: setSources(), types: ['mcq', 'truefalse'], count: 6 }),
+      String(notebookId),
+      {
+        resolveLlmKey: async () => 'test-key',
+        completeBatch: async () => {
+          calls += 1;
+          return calls === 1
+            ? JSON.stringify([mcq(1, '-progress'), mcq(2, '-progress'), truefalse(1, '-progress')])
+            : JSON.stringify([
+                mcq(3, '-progress'),
+                mcq(4, '-progress'),
+                truefalse(2, '-progress'),
+                truefalse(3, '-progress')
+              ]);
+        },
+        onEvent: (event) => {
+          if (event.type === 'done') events.push(`done:${event.generated}/${event.requested}`);
+          else if (event.type === 'progress') events.push(`progress:${event.written}/${event.total}`);
+          else events.push(`prepared:${event.total}`);
+        }
+      }
+    );
+
+    expect(res.status).toBe(201);
+    expect(events).toEqual(['prepared:6', 'progress:3/6', 'progress:6/6', 'done:6/6']);
+  });
+
   it('retries a malformed batch once, then gives up with a readable 502', async () => {
     const res = await quizGenerate(db, request({ sources: setSources(), types: ['mcq'], count: 5 }), String(notebookId), {
       resolveLlmKey: async () => 'test-key',
