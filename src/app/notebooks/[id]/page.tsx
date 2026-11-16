@@ -12,13 +12,14 @@ import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
 import ChatListPanel from "@/components/chat/ChatListPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
+import ExamListPanel from "@/components/quiz/ExamListPanel";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 import { authRedirectFor } from "@/lib/client/api";
 import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 import { useSmartBack } from "@/lib/client/history";
 
-type Tab = "overview" | "chat" | "cards";
+type Tab = "overview" | "chat" | "cards" | "quiz";
 
 /**
  * `bundle === null` alone cannot tell "still fetching" from "no such notebook",
@@ -347,7 +348,7 @@ export default function NotebookScreen() {
 
   useEffect(() => {
     const value = search.get("tab");
-    if (value === "overview" || value === "chat" || value === "cards") setTab(value);
+    if (value === "overview" || value === "chat" || value === "cards" || value === "quiz") setTab(value);
   }, [search]);
 
   function chooseTab(value: Tab) {
@@ -520,6 +521,7 @@ export default function NotebookScreen() {
               <Skeleton height={44} radius="var(--r-pill)" />
               <Skeleton height={44} radius="var(--r-pill)" />
               <Skeleton height={44} radius="var(--r-pill)" />
+              <Skeleton height={44} radius="var(--r-pill)" />
             </div>
           </div>
           <div className="tabpanel px stack--16">
@@ -575,7 +577,8 @@ export default function NotebookScreen() {
   const tabs: Array<[Tab, string]> = [
     ["overview", "Overview"],
     ["chat", "Chat"],
-    ["cards", "Cards"]
+    ["cards", "Cards"],
+    ["quiz", "Quiz"]
   ];
 
   return (
@@ -635,7 +638,7 @@ export default function NotebookScreen() {
             notebookTitle={bundle.title}
             hasSources={bundle.sources.length > 0}
           />
-        ) : (
+        ) : tab === "cards" ? (
           <CardsPanelView
             bundle={bundle}
             onReview={startReview}
@@ -651,6 +654,8 @@ export default function NotebookScreen() {
             }}
             onGenerate={handleGenerate}
           />
+        ) : (
+          <ExamListPanel notebookId={id} notebookTitle={bundle.title} sources={bundle.sources} />
         )}
       </div>
     </ScreenSection>

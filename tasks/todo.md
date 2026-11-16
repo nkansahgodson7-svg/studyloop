@@ -61,8 +61,19 @@ Spec: `docs/spec.md` · Plan: `tasks/plan.md`
 
 ## Phase 6: Quiz
 
-- [ ] Task 14: Quiz generation (topic-scoped, streamed batches ≤ 6)
-- [ ] Task 15: Quiz play + AI grading (scores persisted)
+Spec: `tasks/quiz-spec.md` (confirmed 2026-11-16)- [x] Task 14: Quiz data layer + generation — new exam/item/attempt tables, shared
+  generation material, mixed-type batches ≤ 6 with a 40 s deadline — done
+  2026-11-16. `src/lib/server/{quiz,quiz-generate,quiz-prompt}.ts` + tests;
+  `generation-material.ts` extracted from `cards.ts`.
+  - Acceptance: 10-question mixed exam generated from a real PDF ≤ 40 s; item
+    validation drops malformed questions; dedupe; 502 when nothing valid
+- [x] Task 15: Quiz play + AI grading — one active attempt per exam, resume,
+  timer auto-submit, partial-credit AI grading for short answers, results +
+  breakdown + missed→flashcards — done 2026-11-16. `quiz-grade.ts`, `quiz-api.ts`,
+  routes under `/api/quizzes*` + `/api/quiz-attempts*`, Quiz tab + exam/take/
+  results screens, Home/Review latest score.
+  - Acceptance: take → submit → score; retake shuffles options only; timer
+    auto-submits with unanswered = 0; grading failure never loses the attempt
 
 ## Phase 7: Ship
 

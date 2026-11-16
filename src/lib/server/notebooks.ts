@@ -50,6 +50,7 @@ export interface NotebookViewRow {
   sources: number;
   cards: number;
   due: number;
+  lastQuiz: { examId: number; score: number; at: string } | null;
 }
 
 export async function listNotebookViews(
@@ -64,7 +65,19 @@ export async function listNotebookViews(
                  (SELECT COUNT(*) FROM sources s WHERE s.notebook_id = nb.id) AS sources,
                  (SELECT COUNT(*) FROM cards c WHERE c.notebook_id = nb.id) AS cards,
                  (SELECT COUNT(*) FROM cards c JOIN reviews r ON r.card_id = c.id
-                   WHERE c.notebook_id = nb.id AND r.due <= ?) AS due
+                   WHERE c.notebook_id = nb.id AND r.due <= ?) AS due,
+                 (SELECT a.exam_id FROM quiz_exam_attempts a
+                    JOIN quiz_exams e ON e.id = a.exam_id
+                   WHERE e.notebook_id = nb.id AND a.status = 'graded'
+                   ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1) AS last_quiz_exam,
+                 (SELECT a.score FROM quiz_exam_attempts a
+                    JOIN quiz_exams e ON e.id = a.exam_id
+                   WHERE e.notebook_id = nb.id AND a.status = 'graded'
+                   ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1) AS last_quiz_score,
+                 (SELECT a.submitted_at FROM quiz_exam_attempts a
+                    JOIN quiz_exams e ON e.id = a.exam_id
+                   WHERE e.notebook_id = nb.id AND a.status = 'graded'
+                   ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1) AS last_quiz_at
           FROM notebooks nb
           WHERE nb.user_id = ?
           ORDER BY nb.created_at DESC, nb.id DESC`,
@@ -74,7 +87,15 @@ export async function listNotebookViews(
     notebook: rowToNotebook(row),
     sources: Number(row.sources),
     cards: Number(row.cards),
-    due: Number(row.due)
+    due: Number(row.due),
+    lastQuiz:
+      row.last_quiz_exam == null || row.last_quiz_score == null
+        ? null
+        : {
+            examId: Number(row.last_quiz_exam),
+            score: Number(row.last_quiz_score),
+            at: String(row.last_quiz_at ?? '')
+          }
   }));
 }
 

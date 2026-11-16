@@ -192,7 +192,7 @@ export async function listUsers(db: Client): Promise<AdminUserRow[]> {
                   SELECT se.user_id AS uid, se.created_at AS ts
                     FROM sessions se WHERE se.created_at IS NOT NULL
                   UNION ALL
-                  SELECT qa.user_id AS uid, qa.created_at AS ts FROM quiz_attempts qa
+                  SELECT qa.user_id AS uid, qa.started_at AS ts FROM quiz_exam_attempts qa
                 ) events
               GROUP BY events.uid
             )
@@ -300,6 +300,18 @@ export async function deleteUser(db: Client, userId: number): Promise<boolean> {
   await db.batch([
     { sql: 'DELETE FROM quiz_attempts WHERE user_id = ?', args: [userId] },
     { sql: `DELETE FROM quiz_items WHERE notebook_id IN (${notebookFilter})`, args: [userId] },
+    { sql: 'DELETE FROM quiz_exam_attempts WHERE user_id = ?', args: [userId] },
+    {
+      sql: `DELETE FROM quiz_exam_attempts
+            WHERE exam_id IN (SELECT id FROM quiz_exams WHERE notebook_id IN (${notebookFilter}))`,
+      args: [userId]
+    },
+    {
+      sql: `DELETE FROM quiz_exam_items
+            WHERE exam_id IN (SELECT id FROM quiz_exams WHERE notebook_id IN (${notebookFilter}))`,
+      args: [userId]
+    },
+    { sql: `DELETE FROM quiz_exams WHERE notebook_id IN (${notebookFilter})`, args: [userId] },
     { sql: `DELETE FROM review_log WHERE card_id IN (${cardFilter})`, args: [userId] },
     { sql: `DELETE FROM reviews WHERE card_id IN (${cardFilter})`, args: [userId] },
     {

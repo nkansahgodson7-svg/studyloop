@@ -107,12 +107,28 @@ exit criterion.
 
 ### Phase 6: Quiz (questions + AI grading)
 
-- [ ] Task 14: Quiz generation — topic-scoped, streamed batches ≤ 6 items,
-  stored as `quiz_items`
-- [ ] Task 15: Quiz play + AI grading — answer flow, AI-graded score saved
+Spec: `tasks/quiz-spec.md` (decisions confirmed 2026-11-16). Saved mock exams in a
+4th notebook tab, selectable question types, optional timer, exam-mode feedback,
+AI partial credit for short answers, attempt history + resume, and a topic
+breakdown. Supersedes the original `quiz_items`/`quiz_attempts` sketch and the
+obsolete 120b model pin (the llama deployments are gone; model is
+`GROQ_QUIZ_MODEL ?? GROQ_MODEL`).
+
+- [x] Task 14: Quiz data layer + generation — new `quiz_exams`,
+  `quiz_exam_items`, `quiz_exam_attempts` tables; shared generation material
+  extracted from `cards.ts`; mixed-type batches ≤ 6 items with a 40 s deadline
+  and partial results — done 2026-11-16 (`repo: src/lib/server/quiz.ts`,
+  `quiz-generate.ts`, `quiz-prompt.ts`; 20 generation tests)
+- [x] Task 15: Quiz play + AI grading — one active attempt per exam, resume,
+  timer auto-submit, auto grading for objective items, one batched AI grading
+  call for short answers, results + breakdown + missed→flashcards — done
+  2026-11-16 (`quiz-grade.ts`, `quiz-api.ts`, API routes, 4th notebook tab,
+  exam/take/results screens, Home + Review `lastQuiz`)
 
 ### Checkpoint: Quiz
-- [ ] Generate ≥ 8 items from a topic → play → AI grades (mocked tests + manual)
+- [x] Generate ≥ 8 items from a topic → play → AI grades (mocked tests + manual) —
+  generation, grading, submit/resume and missed→cards covered by tests; full
+  gate green; live AI run still worth one manual pass on the preview URL
 
 ### Phase 7: Ship
 
