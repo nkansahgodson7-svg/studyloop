@@ -2,7 +2,7 @@ import type { Client } from '@libsql/client';
 import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from './auth';
 import { ownNotebook } from './notebooks';
-import { resolveLlmKey } from './chat';
+import { resolveLlmKey } from './llm-key';
 import { QUIZ_GENERATE_LIMIT, rateLimitResponse } from './ratelimit';
 import { validationError } from './errors';
 import {
@@ -11,7 +11,7 @@ import {
   resolveGenerationSelections,
   type RequestedGenerationSource
 } from './generation-material';
-import { createQuizExam, publicItem, type NewQuizItem } from './quiz';
+import { createQuizExam, publicItem, type NewQuizItem, type QuizExamRow } from './quiz';
 import {
   buildQuizGenerationPrompt,
   QUIZ_GENERATION_SYSTEM,
@@ -27,7 +27,8 @@ import {
   QUIZ_PROMPT_MAX,
   QUIZ_TOPIC_MAX,
   type QuizExamConfig,
-  type QuizKind
+  type QuizKind,
+  type QuizPublicItem
 } from '../quiz';
 
 export const QUIZ_BATCH_SIZE = 6;
@@ -219,20 +220,35 @@ async function groqQuizBatch(apiKey: string, system: string, user: string): Prom
   }
 }
 
+export interface QuizGenerationSettings {
+  selections: RequestedGenerationSource[];
+  types: QuizKind[];
+  count: number;
+  timerMinutes: number | null;
+  focus: string;
+  /** Exam title prefix; chat quizzes use a different one from the tab. */
+  titlePrefix?: string;
+}
+
+export interface QuizGenerationPayload {
+  exam: QuizExamRow;
+  items: QuizPublicItem[];
+  requested: number;
+  generated: number;
+  truncated: boolean;
+  failedBatches: number;
+}
+
+export type QuizGenerationOutcome =
+  | { ok: true; payload: QuizGenerationPayload }
+  | { ok: false; status: number; error: string; code?: string };
+
 export type QuizGenerateEvent =
   | { type: 'prepared'; total: number; sources: number }
   | { type: 'progress'; written: number; total: number }
-  | {
-      type: 'done';
-      exam: unknown;
-      items: unknown[];
-      requested: number;
-      generated: number;
-      truncated: boolean;
-      failedBatches: number;
-    };
+  | ({ type: 'done' } & QuizGenerationPayload);
 
-interface QuizGenerateDeps {
+export interface QuizGenerateDeps {
   resolveLlmKey?: typeof resolveLlmKey;
   completeBatch?: (apiKey: string, system: string, user: string) => Promise<string>;
   deadlineMs?: number;
@@ -240,9 +256,149 @@ interface QuizGenerateDeps {
   onEvent?: (event: QuizGenerateEvent) => void;
 }
 
-function titleFor(focus: string, sourceSummary: string): string {
+function titleFor(focus: string, sourceSummary: string, prefix = 'Mock exam'): string {
   const base = focus.trim().length > 0 ? focus.trim() : sourceSummary;
-  return `Mock exam · ${base}`.slice(0, 80);
+  return `${prefix} · ${base}`.slice(0, 80);
+}
+
+/**
+ * Generates and stores one exam. Shared by the exam route and the chat quiz
+ * turn, which is why it reports failures as values instead of HTTP responses.
+ */
+export async function generateQuizRecord(
+  db: Client,
+  userId: number,
+  notebookId: number,
+  settings: QuizGenerationSettings,
+  deps: QuizGenerateDeps = {}
+): Promise<QuizGenerationOutcome> {
+  const selections = await resolveGenerationSelections(db, notebookId, settings.selections);
+  const resolveKey = deps.resolveLlmKey ?? resolveLlmKey;
+  const apiKey = await resolveKey(db, userId);
+  if (!apiKey) {
+    return {
+      ok: false,
+      status: 503,
+      error:
+        'No LLM key is configured. The owner can set GROQ_API_KEY, or you can add a personal key in Settings.'
+    };
+  }
+
+  const { types, count, timerMinutes, focus } = settings;
+  const built = await buildGenerationContext(db, notebookId, selections, focus || null);
+  if (!built) {
+    return { ok: false, status: 400, error: 'no source material found for that selection' };
+  }
+  deps.onEvent?.({ type: 'prepared', total: count, sources: selections.length });
+
+  const complete =
+    deps.completeBatch ??
+    (async (key: string, system: string, prompt: string) => groqQuizBatch(key, system, prompt));
+  const deadline = Date.now() + (deps.deadlineMs ?? QUIZ_GENERATION_DEADLINE_MS);
+  const remaining = allocateQuizKinds(types, count);
+  const seen = new Set<string>();
+  const existing = await db.execute({
+    sql: 'SELECT prompt FROM quiz_exam_items WHERE exam_id IN (SELECT id FROM quiz_exams WHERE notebook_id = ?)',
+    args: [notebookId]
+  });
+  for (const row of existing.rows) {
+    seen.add(normalizeFront(String(row.prompt)));
+  }
+
+  const accepted: NewQuizItem[] = [];
+  let failedBatches = 0;
+  let batches = 0;
+  const singleSourceId = selections.length === 1 ? selections[0]!.sourceId : null;
+
+  while (accepted.length < count && batches < MAX_QUIZ_BATCHES) {
+    if (Date.now() >= deadline) break;
+    const plan = planNextBatch(remaining, Math.min(QUIZ_BATCH_SIZE, count - accepted.length));
+    if (Object.keys(plan).length === 0) break;
+    batches += 1;
+    const prompt = buildQuizGenerationPrompt({
+      context: built.context,
+      focus: focus || null,
+      counts: plan
+    });
+
+    const allowed = new Set(Object.keys(plan).filter(isQuizKind));
+    let reply: string | null = null;
+    try {
+      reply = await complete(apiKey, QUIZ_GENERATION_SYSTEM, prompt);
+    } catch {
+      failedBatches += 1;
+      if (failedBatches >= 2) break;
+      continue;
+    }
+    let parsed = parseGeneratedBatch(reply, allowed);
+    if (parsed.items.length === 0) {
+      try {
+        reply = await complete(
+          apiKey,
+          `${QUIZ_GENERATION_SYSTEM}\nYour previous reply was not a usable JSON array. Reply with ONLY the JSON array now.`,
+          prompt
+        );
+      } catch {
+        reply = null;
+      }
+      if (reply) parsed = parseGeneratedBatch(reply, allowed);
+    }
+    if (parsed.items.length === 0) {
+      failedBatches += 1;
+      if (failedBatches >= 2) break;
+      continue;
+    }
+
+    failedBatches = 0;
+    const before = accepted.length;
+    for (const item of parsed.items) {
+      const quota = remaining[item.kind] ?? 0;
+      if (quota <= 0) continue;
+      const key = normalizeFront(item.prompt);
+      if (key.length === 0 || seen.has(key)) continue;
+      seen.add(key);
+      remaining[item.kind] = quota - 1;
+      accepted.push({ ...item, sourceId: singleSourceId });
+      if (accepted.length >= count) break;
+    }
+    if (accepted.length > before) {
+      deps.onEvent?.({ type: 'progress', written: accepted.length, total: count });
+    }
+  }
+
+  if (accepted.length === 0) {
+    return {
+      ok: false,
+      status: 502,
+      error: 'the model did not return usable questions',
+      code: 'GENERATION_INVALID'
+    };
+  }
+
+  const config: QuizExamConfig = {
+    types,
+    requestedCount: count,
+    timerMinutes,
+    sourceSummary: built.sourceSummary
+  };
+  const created = await createQuizExam(db, {
+    notebookId,
+    title: titleFor(focus, built.sourceSummary, settings.titlePrefix),
+    topic: focus,
+    config,
+    items: accepted
+  });
+
+  const payload: QuizGenerationPayload = {
+    exam: created.exam,
+    items: created.items.map(publicItem),
+    requested: count,
+    generated: accepted.length,
+    truncated: accepted.length < count,
+    failedBatches
+  };
+  deps.onEvent?.({ type: 'done', ...payload });
+  return { ok: true, payload };
 }
 
 export async function quizGenerate(
@@ -332,125 +488,20 @@ export async function quizGenerate(
       return NextResponse.json({ error: `focus must be at most ${QUIZ_FOCUS_MAX} characters` }, { status: 400 });
     }
 
-    const selections = await resolveGenerationSelections(db, notebookId, requested);
-    const resolveKey = deps.resolveLlmKey ?? resolveLlmKey;
-    const apiKey = await resolveKey(db, user.id);
-    if (!apiKey) {
+    const outcome = await generateQuizRecord(
+      db,
+      user.id,
+      notebookId,
+      { selections: requested, types, count, timerMinutes, focus },
+      deps
+    );
+    if (!outcome.ok) {
       return NextResponse.json(
-        { error: 'No LLM key is configured. The owner can set GROQ_API_KEY, or you can add a personal key in Settings.' },
-        { status: 503 }
+        { error: outcome.error, ...(outcome.code ? { code: outcome.code } : {}) },
+        { status: outcome.status }
       );
     }
-
-    const built = await buildGenerationContext(db, notebookId, selections, focus || null);
-    if (!built) {
-      return NextResponse.json({ error: 'no source material found for that selection' }, { status: 400 });
-    }
-    deps.onEvent?.({ type: 'prepared', total: count, sources: selections.length });
-
-    const complete =
-      deps.completeBatch ??
-      (async (key: string, system: string, prompt: string) => groqQuizBatch(key, system, prompt));
-    const deadline = Date.now() + (deps.deadlineMs ?? QUIZ_GENERATION_DEADLINE_MS);
-    const remaining = allocateQuizKinds(types, count);
-    const seen = new Set<string>();
-    const existing = await db.execute({
-      sql: 'SELECT prompt FROM quiz_exam_items WHERE exam_id IN (SELECT id FROM quiz_exams WHERE notebook_id = ?)',
-      args: [notebookId]
-    });
-    for (const row of existing.rows) {
-      seen.add(normalizeFront(String(row.prompt)));
-    }
-
-    const accepted: NewQuizItem[] = [];
-    let failedBatches = 0;
-    let batches = 0;
-    const singleSourceId = selections.length === 1 ? selections[0]!.sourceId : null;
-
-    while (accepted.length < count && batches < MAX_QUIZ_BATCHES) {
-      if (Date.now() >= deadline) break;
-      const plan = planNextBatch(remaining, Math.min(QUIZ_BATCH_SIZE, count - accepted.length));
-      if (Object.keys(plan).length === 0) break;
-      batches += 1;
-      const prompt = buildQuizGenerationPrompt({
-        context: built.context,
-        focus: focus || null,
-        counts: plan
-      });
-
-      const allowed = new Set(Object.keys(plan).filter(isQuizKind));
-      let reply: string | null = null;
-      try {
-        reply = await complete(apiKey, QUIZ_GENERATION_SYSTEM, prompt);
-      } catch {
-        failedBatches += 1;
-        if (failedBatches >= 2) break;
-        continue;
-      }
-      let parsed = parseGeneratedBatch(reply, allowed);
-      if (parsed.items.length === 0) {
-        try {
-          reply = await complete(
-            apiKey,
-            `${QUIZ_GENERATION_SYSTEM}\nYour previous reply was not a usable JSON array. Reply with ONLY the JSON array now.`,
-            prompt
-          );
-        } catch {
-          reply = null;
-        }
-        if (reply) parsed = parseGeneratedBatch(reply, allowed);
-      }
-      if (parsed.items.length === 0) {
-        failedBatches += 1;
-        if (failedBatches >= 2) break;
-        continue;
-      }
-
-      failedBatches = 0;
-      const before = accepted.length;
-      for (const item of parsed.items) {
-        const quota = remaining[item.kind] ?? 0;
-        if (quota <= 0) continue;
-        const key = normalizeFront(item.prompt);
-        if (key.length === 0 || seen.has(key)) continue;
-        seen.add(key);
-        remaining[item.kind] = quota - 1;
-        accepted.push({ ...item, sourceId: singleSourceId });
-        if (accepted.length >= count) break;
-      }
-      if (accepted.length > before) {
-        deps.onEvent?.({ type: 'progress', written: accepted.length, total: count });
-      }
-    }
-
-    if (accepted.length === 0) {
-      throw validationError('GENERATION_INVALID', 'the model did not return usable questions', 502);
-    }
-
-    const config: QuizExamConfig = {
-      types,
-      requestedCount: count,
-      timerMinutes,
-      sourceSummary: built.sourceSummary
-    };
-    const created = await createQuizExam(db, {
-      notebookId,
-      title: titleFor(focus, built.sourceSummary),
-      topic: focus,
-      config,
-      items: accepted
-    });
-
-    const payload = {
-      exam: created.exam,
-      items: created.items.map(publicItem),
-      requested: count,
-      generated: accepted.length,
-      truncated: accepted.length < count,
-      failedBatches
-    };
-    deps.onEvent?.({ type: 'done', ...payload });
-    return NextResponse.json(payload, { status: 201 });
+    return NextResponse.json(outcome.payload, { status: 201 });
   } catch (error) {
     return errorResponse(error);
   }

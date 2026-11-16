@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Icon } from "@/components/ui/icons";
 import type { ChatMessage } from "@/lib/client/chat";
 import Markdown from "./Markdown";
+import ChatQuiz from "./ChatQuiz";
 import SourcesUsed from "./SourcesUsed";
 
 export function groundingLabel(grounding: ChatMessage["grounding"]): string | null {
@@ -167,6 +168,7 @@ export default function MessageBubble({
             </span>
           </div>
         ) : null}
+        {message.quizExamId ? <ChatQuiz examId={message.quizExamId} /> : null}
         {label ? (
           <div className={`grounding grounding--${message.grounding}`}>
             <span className="grounding__dot" aria-hidden="true" />
@@ -182,7 +184,7 @@ export default function MessageBubble({
             <button type="button" onClick={copy} aria-label="Copy answer">
               <Icon name={copied ? "check" : "copy"} size={14} />
             </button>
-            {onRegenerate ? (
+            {onRegenerate && !message.quizExamId ? (
               <button type="button" onClick={onRegenerate} aria-label="Regenerate answer" disabled={busy}>
                 <Icon name="rotate" size={14} />
               </button>

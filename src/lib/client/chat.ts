@@ -29,6 +29,8 @@ export interface ChatMessage {
   grounding: Grounding | null;
   sources: ChatSourceRef[];
   status: MessageStatus;
+  /** Set when this answer carries an inline quiz. */
+  quizExamId: number | null;
   createdAt: string;
 }
 
@@ -117,6 +119,8 @@ export interface StreamHandlers {
   onGrounding?: (label: Grounding, sources: ChatSourceRef[]) => void;
   onDelta?: (text: string) => void;
   onDone?: (messageId: number, createdAt: string) => void;
+  /** Real question counts from an inline quiz turn. */
+  onQuizProgress?: (written: number, total: number) => void;
 }
 
 /**
@@ -185,6 +189,9 @@ export async function streamTurn(
         messageId?: number;
         createdAt?: string;
         userMessageId?: number;
+        written?: number;
+        total?: number;
+        quizExamId?: number;
         error?: string;
         code?: string;
         retryable?: boolean;
@@ -200,6 +207,8 @@ export async function streamTurn(
         handlers.onGrounding?.(parsed.label, parsed.sources ?? []);
       } else if (parsed.type === "delta" && typeof parsed.text === "string") {
         handlers.onDelta?.(parsed.text);
+      } else if (parsed.type === "quiz_progress" && typeof parsed.total === "number") {
+        handlers.onQuizProgress?.(parsed.written ?? 0, parsed.total);
       } else if (parsed.type === "done" && typeof parsed.messageId === "number") {
         handlers.onDone?.(parsed.messageId, parsed.createdAt ?? new Date().toISOString());
       } else if (parsed.type === "error") {

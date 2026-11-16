@@ -40,6 +40,8 @@ export interface ChatMessageRow {
   grounding: Grounding | null;
   sources: SourceRef[];
   status: 'complete' | 'stopped' | 'error';
+  /** Set when the answer is an inline quiz generated in this chat. */
+  quizExamId: number | null;
   createdAt: string;
 }
 
@@ -97,6 +99,7 @@ export function rowToMessage(row: Record<string, InValue>): ChatMessageRow {
     grounding,
     sources: parseSources(row['sources']),
     status,
+    quizExamId: row['quiz_exam_id'] == null ? null : Number(row['quiz_exam_id']),
     createdAt: String(row['created_at'])
   };
 }
@@ -219,7 +222,7 @@ export async function listMessages(
 ): Promise<MessagePage> {
   const limit = options.limit ?? MESSAGE_PAGE_SIZE;
   const result = await db.execute({
-    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, created_at
+    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, quiz_exam_id, created_at
           FROM chat_messages
           WHERE conversation_id = ?${options.before != null ? ' AND id < ?' : ''}
           ORDER BY id DESC
@@ -244,22 +247,24 @@ export async function createMessage(
     grounding?: Grounding | null;
     sources?: SourceRef[];
     status?: 'complete' | 'stopped' | 'error';
+    quizExamId?: number | null;
   }
 ): Promise<ChatMessageRow> {
   const result = await db.execute({
-    sql: `INSERT INTO chat_messages (conversation_id, role, content, grounding, sources, status)
-          VALUES (?, ?, ?, ?, ?, ?)`,
+    sql: `INSERT INTO chat_messages (conversation_id, role, content, grounding, sources, status, quiz_exam_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
     args: [
       conversationId,
       input.role,
       input.content,
       input.grounding ?? null,
       JSON.stringify(input.sources ?? []),
-      input.status ?? 'complete'
+      input.status ?? 'complete',
+      input.quizExamId ?? null
     ]
   });
   const row = await db.execute({
-    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, created_at
+    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, quiz_exam_id, created_at
           FROM chat_messages WHERE id = ?`,
     args: [Number(result.lastInsertRowid!)]
   });
@@ -295,7 +300,7 @@ export async function messageOwned(
   messageId: number
 ): Promise<ChatMessageRow | null> {
   const result = await db.execute({
-    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, created_at
+    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, quiz_exam_id, created_at
           FROM chat_messages WHERE id = ? AND conversation_id = ?`,
     args: [messageId, conversationId]
   });
@@ -310,7 +315,7 @@ export async function previousUserMessage(
   messageId: number
 ): Promise<ChatMessageRow | null> {
   const result = await db.execute({
-    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, created_at
+    sql: `SELECT id, conversation_id, role, content, grounding, sources, status, quiz_exam_id, created_at
           FROM chat_messages
           WHERE conversation_id = ? AND id < ? AND role = 'user'
           ORDER BY id DESC LIMIT 1`,

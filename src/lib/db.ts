@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS chat_messages (
   grounding TEXT CHECK (grounding IN ('sources', 'general', 'mixed')),
   sources TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'stopped', 'error')),
+  quiz_exam_id INTEGER REFERENCES quiz_exams(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
@@ -288,6 +289,7 @@ async function rebuildChatTablesOnce(db: Client): Promise<void> {
       grounding TEXT CHECK (grounding IN ('sources', 'general', 'mixed')),
       sources TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'complete' CHECK (status IN ('complete', 'stopped', 'error')),
+      quiz_exam_id INTEGER REFERENCES quiz_exams(id) ON DELETE SET NULL,
       created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
     );
     CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, id);
@@ -339,6 +341,13 @@ export async function applySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute('ALTER TABLE users ADD COLUMN password_expires_at TEXT');
+  } catch {
+    // column already exists
+  }
+  try {
+    await db.execute(
+      'ALTER TABLE chat_messages ADD COLUMN quiz_exam_id INTEGER REFERENCES quiz_exams(id) ON DELETE SET NULL'
+    );
   } catch {
     // column already exists
   }

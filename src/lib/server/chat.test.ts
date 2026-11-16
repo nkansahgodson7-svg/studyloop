@@ -19,6 +19,8 @@ import {
 } from './chat';
 import { createConversation, listMessages } from './conversations';
 import { ingestTextSource } from './ingest/ingest';
+import { listQuizExams, listQuizItems } from './quiz';
+import { quizFocus, wantsQuiz } from './chat-quiz';
 
 function makeRequest(
   url: string,
@@ -53,6 +55,49 @@ function iterOf(chunks: string[]): AsyncIterable<string> {
 
 function streamOf(chunks: string[]): ChatDeps['completeStream'] {
   return () => iterOf(chunks);
+}
+
+function inlineQuizBatch(): unknown[] {
+  return [
+    {
+      kind: 'mcq',
+      topic: 'Respiration',
+      prompt: 'Where does glycolysis happen?',
+      options: ['Cytoplasm', 'Nucleus', 'Mitochondrion'],
+      correctIndex: 0,
+      explanation: 'Glycolysis is cytosolic.'
+    },
+    {
+      kind: 'mcq',
+      topic: 'Respiration',
+      prompt: 'Which molecule accepts electrons at the end of the chain?',
+      options: ['Oxygen', 'Glucose', 'ATP'],
+      correctIndex: 0,
+      explanation: 'Oxygen is the terminal acceptor.'
+    },
+    {
+      kind: 'multi',
+      topic: 'Respiration',
+      prompt: 'Select the products of the citric acid cycle.',
+      options: ['NADH', 'FADH2', 'Pyruvate', 'ATP'],
+      correctIndexes: [0, 1, 3],
+      explanation: 'The cycle yields reducing equivalents and ATP.'
+    },
+    {
+      kind: 'truefalse',
+      topic: 'Respiration',
+      prompt: 'Fermentation requires oxygen.',
+      answer: false,
+      explanation: 'It regenerates NAD+ without oxygen.'
+    },
+    {
+      kind: 'fillin',
+      topic: 'Respiration',
+      prompt: 'ATP synthase uses a proton ____ to make ATP.',
+      accepted: ['gradient'],
+      explanation: 'Chemiosmosis couples the gradient to ATP production.'
+    }
+  ];
 }
 
 describe('chat conversations', () => {
@@ -99,6 +144,15 @@ describe('chat conversations', () => {
 
   afterAll(async () => {
     await db.close();
+  });
+
+  it('recognises quiz asks and keeps just the subject as focus', () => {
+    expect(wantsQuiz('Quiz me on this')).toBe(true);
+    expect(wantsQuiz('Can you quiz me on chapter 3?')).toBe(true);
+    expect(wantsQuiz('Explain cellular respiration')).toBe(false);
+    expect(quizFocus('Quiz me on this')).toBe('');
+    expect(quizFocus('Quiz me on the Calvin cycle')).toBe('the Calvin cycle');
+    expect(quizFocus('Can you quiz me about enzymes?')).toBe('enzymes');
   });
 
   it('has no key when nothing is configured', async () => {
@@ -395,6 +449,46 @@ describe('chat conversations', () => {
       String(chatId)
     );
     expect(long.status).toBe(400);
+  });
+
+  it('writes a quiz for "Quiz me" and links it to the chat answer', async () => {
+    const quizChat = (await createConversation(db, notebookId, 'Quiz please')).id;
+    const res = await messagePost(
+      db,
+      makeRequest(
+        `http://x/api/chats/${quizChat}/messages`,
+        JSON.stringify({ question: 'Quiz me on cellular respiration' }),
+        token
+      ),
+      String(quizChat),
+      {
+        resolveLlmKey: async () => 'test-key',
+        quiz: { completeBatch: async () => JSON.stringify(inlineQuizBatch()) },
+        genTitle: async () => undefined
+      }
+    );
+
+    expect(res.status).toBe(200);
+    const frames = await readSse(res);
+    expect(frames[0]).toMatchObject({ type: 'start' });
+    expect(frames.some((frame) => frame.type === 'quiz_progress')).toBe(true);
+    const done = frames.find((frame) => frame.type === 'done') as
+      | { quizExamId?: number }
+      | undefined;
+    expect(done?.quizExamId).toBeGreaterThan(0);
+
+    const page = await listMessages(db, quizChat);
+    expect(page.messages).toHaveLength(2);
+    expect(page.messages[1]).toMatchObject({
+      role: 'assistant',
+      quizExamId: done?.quizExamId
+    });
+    expect(page.messages[1]!.content).toContain('quiz');
+
+    const stored = await listQuizItems(db, done!.quizExamId!);
+    expect(stored).toHaveLength(5);
+    const exams = await listQuizExams(db, notebookId, userId);
+    expect(exams.some((exam) => exam.id === done?.quizExamId)).toBe(true);
   });
 
   it('answers 404 for foreign or unknown chats', async () => {
