@@ -175,7 +175,7 @@ export default function QuizExamPage() {
 
   return (
     <ScreenSection>
-      <div className="topbar">
+      <div className="topbar topbar--sticky">
         <button className="icon-btn" type="button" onClick={goBack} aria-label="Back">
           <Icon name="back" />
         </button>

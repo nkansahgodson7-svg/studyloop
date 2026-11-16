@@ -864,6 +864,18 @@ picture {
   padding: 8px 12px;
 }
 
+/* Screens whose primary action lives in the bar keep it reachable while the
+   content beneath scrolls (the quiz overview's attempt list). The negative
+   margin pulls the paper under the safe area, which the screen already pads. */
+.topbar--sticky {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  padding-top: calc(8px + env(safe-area-inset-top));
+  margin-top: calc(-1 * env(safe-area-inset-top));
+  background: var(--paper);
+}
+
 .topbar__title {
   font-size: 15px;
   font-weight: 550;
