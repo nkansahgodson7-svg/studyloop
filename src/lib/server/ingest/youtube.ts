@@ -141,6 +141,17 @@ function youtubeFailure(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
+/**
+ * One line per strategy attempt. YouTube's answer depends on the egress IP, so
+ * when ingestion fails in a deployed environment these lines are the only way
+ * to tell "the video has no captions" from "this server is being refused".
+ */
+function logAttempt(videoId: string, strategy: string, error: unknown): void {
+  const code = (error as { code?: string })?.code ?? 'UNKNOWN';
+  const message = (error as Error)?.message ?? String(error);
+  console.warn(`[youtube] ${videoId} ${strategy}: ${code} — ${message}`);
+}
+
 function trackBaseUrl(track: CaptionTrack): string {
   return track.base_url ?? track.baseUrl ?? '';
 }
@@ -516,6 +527,12 @@ async function fetchPlayerInfo(
     if (status === 'LOGIN_REQUIRED' || /not a bot|sign in to confirm/i.test(reason)) {
       throw youtubeFailure('BOT_CHECK', reason || 'YouTube requires sign-in for this request');
     }
+    // "YouTube is no longer supported in this application or device" is a
+    // rejection of the client/version we sent, not of the video, so the next
+    // client is worth trying.
+    if (/no longer supported|update your (app|application|browser)|unsupported client/i.test(reason)) {
+      throw youtubeFailure('CLIENT_REJECTED', reason);
+    }
     throw youtubeFailure('NO_TRANSCRIPT', reason || 'video is not available for transcript extraction');
   }
 
@@ -539,15 +556,26 @@ export async function fetchTranscriptFromPlayer(
   const fetchImpl = options.fetchImpl ?? (fetch as FetchLike);
   const language = options.language ?? 'en';
   let lastError: unknown;
+  // Set when YouTube is refusing this server (bot check) or the client ids we
+  // send are no longer accepted. Both are reported as BOT_CHECK so the route
+  // can explain the block instead of leaking a client-specific message.
+  let gated = false;
 
   for (const client of PLAYER_CLIENTS) {
     let info: PlayerInfo;
     try {
       info = await fetchPlayerInfo(videoId, client, fetchImpl);
     } catch (error) {
+      logAttempt(videoId, client.name, error);
+      const code = (error as { code?: string })?.code;
+      if (code === 'BOT_CHECK' || code === 'CLIENT_REJECTED') {
+        gated = true;
+        lastError = error;
+        continue;
+      }
       // "Private video", "removed", age-gated: the same answer from every
-      // client, so stop early. A bot check or a network failure may not be.
-      if ((error as { code?: string })?.code === 'NO_TRANSCRIPT') {
+      // client, so stop early.
+      if (code === 'NO_TRANSCRIPT') {
         throw error;
       }
       lastError = error;
@@ -555,6 +583,7 @@ export async function fetchTranscriptFromPlayer(
     }
 
     if (info.tracks.length === 0) {
+      logAttempt(videoId, client.name, youtubeFailure('NO_CAPTIONS', 'no caption tracks'));
       lastError = youtubeFailure('NO_CAPTIONS', 'no transcript available for this video');
       continue;
     }
@@ -579,9 +608,13 @@ export async function fetchTranscriptFromPlayer(
         // try the next track
       }
     }
+    logAttempt(videoId, client.name, youtubeFailure('NO_TRANSCRIPT', 'caption fetch failed'));
     lastError = youtubeFailure('NO_TRANSCRIPT', 'no transcript available for this video');
   }
 
+  if (gated) {
+    throw youtubeFailure('BOT_CHECK', 'YouTube rejected every client from this server');
+  }
   const code = (lastError as { code?: string } | undefined)?.code;
   if (typeof code === 'string') throw lastError;
   throw youtubeFailure('NO_TRANSCRIPT', 'no transcript available for this video');
@@ -683,6 +716,7 @@ async function realFetchTranscript(videoId: string): Promise<FetchedTranscript> 
     return await fetchTranscriptFromPlayer(videoId);
   } catch (error) {
     primaryError = error;
+    logAttempt(videoId, 'inner-tube-player', error);
     // A definite "this video is unavailable / has no transcript" answer is
     // worth returning immediately; the watch page and youtubei.js would only
     // repeat it. A bot check is about our IP, so keep falling back.
@@ -695,6 +729,7 @@ async function realFetchTranscript(videoId: string): Promise<FetchedTranscript> 
   try {
     return await fetchTranscriptFromWatchPage(videoId);
   } catch (watchError) {
+    logAttempt(videoId, 'watch-page', watchError);
     const watchCode = (watchError as { code?: string })?.code;
     if (watchCode !== 'FETCH_FAILED' && watchCode !== 'NO_CAPTIONS') {
       throw watchError;
@@ -704,6 +739,7 @@ async function realFetchTranscript(videoId: string): Promise<FetchedTranscript> 
   try {
     return await fetchViaInnertube(videoId);
   } catch (fallbackError) {
+    logAttempt(videoId, 'youtubei-js', fallbackError);
     // Prefer the bot-check answer: it is the one that tells the user what to do
     // (YouTube is blocking this server, not the video).
     if ((primaryError as { code?: string } | undefined)?.code === 'BOT_CHECK') {
@@ -720,6 +756,7 @@ const statusForCode: Record<string, number> = {
   EMPTY_RESPONSE: 502,
   FETCH_FAILED: 502,
   BOT_CHECK: 502,
+  CLIENT_REJECTED: 502,
   TIMEOUT: 504,
   LIMIT_REACHED: 409
 };
@@ -782,7 +819,7 @@ export async function youtubeSourceCreate(
     const code = (error as { code?: unknown }).code;
     if (typeof code === 'string' && statusForCode[code]) {
       const message =
-        code === 'BOT_CHECK'
+        code === 'BOT_CHECK' || code === 'CLIENT_REJECTED'
           ? BLOCKED_MESSAGE
           : (error as Error).message || 'no transcript available for this video';
       return NextResponse.json({ error: message, code }, { status: statusForCode[code]! });

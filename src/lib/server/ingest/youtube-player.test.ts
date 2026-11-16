@@ -126,6 +126,61 @@ describe('youtube player ingestion', () => {
     expect(attempts.length).toBeGreaterThan(1);
   });
 
+  it('treats a rejected client version as retryable, not as a missing transcript', async () => {
+    const attempts: string[] = [];
+    const rejected: FetchLike = async (input: string, init?: RequestInit) => {
+      if (input.includes('/youtubei/v1/player')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          context: { client: { clientName: string } };
+        };
+        const clientName = body.context.client.clientName;
+        attempts.push(clientName);
+        if (clientName === 'IOS') {
+          return new Response(
+            JSON.stringify({
+              playabilityStatus: {
+                status: 'ERROR',
+                reason: 'YouTube is no longer supported in this application or device.'
+              }
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } }
+          );
+        }
+        return new Response(PLAYER_RESPONSE, {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      if (input.includes('/api/timedtext')) {
+        return new Response(TRANSCRIPT_JSON, {
+          status: 200,
+          headers: { 'content-type': 'application/json' }
+        });
+      }
+      return new Response('not found', { status: 404 });
+    };
+
+    const result = await fetchTranscriptFromPlayer(VIDEO_ID, { fetchImpl: rejected });
+    expect(result.segments).toHaveLength(2);
+    expect(attempts).toEqual(['IOS', 'ANDROID']);
+  });
+
+  it('reports BOT_CHECK when every client is gated or rejected', async () => {
+    const allRejected: FetchLike = async () =>
+      new Response(
+        JSON.stringify({
+          playabilityStatus: {
+            status: 'ERROR',
+            reason: 'YouTube is no longer supported in this application or device.'
+          }
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    await expect(fetchTranscriptFromPlayer(VIDEO_ID, { fetchImpl: allRejected })).rejects.toMatchObject({
+      code: 'BOT_CHECK'
+    });
+  });
+
   it('reports BOT_CHECK when every client is bot-gated', async () => {
     const allGated: FetchLike = async () =>
       new Response(
