@@ -5023,6 +5023,35 @@ picture {
   font-variant-numeric: tabular-nums;
 }
 
+.chat-quiz__toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.chat-quiz__toggle:hover {
+  background: var(--surface-2);
+}
+
+.chat-quiz__toggle svg {
+  color: var(--muted);
+  transition: transform 0.18s var(--ease-out);
+}
+
+.chat-quiz__toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
 .chat-quiz__review {
   display: grid;
   gap: 14px;

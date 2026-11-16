@@ -61,6 +61,7 @@ export default function ChatQuiz({ examId }: { examId: number }) {
   const [status, setStatus] = useState<Status>("loading");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -69,6 +70,7 @@ export default function ChatQuiz({ examId }: { examId: number }) {
       setStatus("loading");
       setError(null);
       setResult(null);
+      setReviewOpen(false);
       try {
         const quiz = await getQuiz(examId);
         if (cancelled) return;
@@ -113,6 +115,7 @@ export default function ChatQuiz({ examId }: { examId: number }) {
     setStatus("loading");
     setError(null);
     setResult(null);
+    setReviewOpen(false);
     try {
       const started = await startQuizAttempt(examId);
       setAttempt(started.attempt);
@@ -155,6 +158,7 @@ export default function ChatQuiz({ examId }: { examId: number }) {
       const finished = await submitQuizAttempt(attempt.id);
       setResult(finished);
       setAttempt(null);
+      setReviewOpen(false);
       setStatus("result");
     } catch (err) {
       setError((err as Error).message || "Could not submit the quiz.");
@@ -199,6 +203,8 @@ export default function ChatQuiz({ examId }: { examId: number }) {
   if (status === "result" && result) {
     const percent = scorePercent(result.attempt.score) ?? 0;
     const notebookId = result.exam.notebookId;
+    const missed = result.items.filter((item) => item.score < 1).length;
+    const reviewId = `chat-quiz-review-${examId}`;
     return (
       <div className="chat-quiz chat-quiz--result">
         <div className="chat-quiz__head">
@@ -216,41 +222,60 @@ export default function ChatQuiz({ examId }: { examId: number }) {
           </span>
         </div>
 
-        <ul className="chat-quiz__review">
-          {result.items.map((item, itemIndex) => {
-            const correct = item.score >= 1;
-            return (
-              <li key={item.id} className="chat-quiz__reviewItem">
-                <div className="chat-quiz__reviewHead">
-                  <span
-                    className={`chat-quiz__mark${correct ? " is-correct" : " is-wrong"}`}
-                    aria-hidden="true"
-                  >
-                    <Icon name={correct ? "check" : "close"} size={12} />
-                  </span>
-                  <span className="chat-quiz__reviewPrompt">
-                    <span className="sr-only">
-                      Question {itemIndex + 1} {correct ? "correct" : "incorrect"}:
+        <button
+          className="chat-quiz__toggle"
+          type="button"
+          aria-expanded={reviewOpen}
+          aria-controls={reviewId}
+          onClick={() => setReviewOpen((open) => !open)}
+        >
+          <span>
+            {reviewOpen
+              ? "Hide review"
+              : missed > 0
+                ? `Review ${missed} missed ${missed === 1 ? "answer" : "answers"}`
+                : `Review ${result.items.length} ${result.items.length === 1 ? "answer" : "answers"}`}
+          </span>
+          <Icon name="chevron" size={16} />
+        </button>
+
+        <div id={reviewId} hidden={!reviewOpen}>
+          <ul className="chat-quiz__review">
+            {result.items.map((item, itemIndex) => {
+              const correct = item.score >= 1;
+              return (
+                <li key={item.id} className="chat-quiz__reviewItem">
+                  <div className="chat-quiz__reviewHead">
+                    <span
+                      className={`chat-quiz__mark${correct ? " is-correct" : " is-wrong"}`}
+                      aria-hidden="true"
+                    >
+                      <Icon name={correct ? "check" : "close"} size={12} />
                     </span>
-                    <Markdown text={item.prompt} />
-                  </span>
-                </div>
-                <p className="chat-quiz__answer">
-                  {correct ? "Correct" : `Your answer: ${givenAnswerText(item, item.answer)}`}
-                  {!correct ? (
-                    <>
-                      <br />
-                      Correct answer: {correctAnswerText(item)}
-                    </>
+                    <span className="chat-quiz__reviewPrompt">
+                      <span className="sr-only">
+                        Question {itemIndex + 1} {correct ? "correct" : "incorrect"}:
+                      </span>
+                      <Markdown text={item.prompt} />
+                    </span>
+                  </div>
+                  <p className="chat-quiz__answer">
+                    {correct ? "Correct" : `Your answer: ${givenAnswerText(item, item.answer)}`}
+                    {!correct ? (
+                      <>
+                        <br />
+                        Correct answer: {correctAnswerText(item)}
+                      </>
+                    ) : null}
+                  </p>
+                  {item.explanation ? (
+                    <p className="chat-quiz__explain">{item.explanation}</p>
                   ) : null}
-                </p>
-                {item.explanation ? (
-                  <p className="chat-quiz__explain">{item.explanation}</p>
-                ) : null}
-              </li>
-            );
-          })}
-        </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
 
         <div className="chat-quiz__foot">
           <Link className="btn btn--ghost btn--sm" href={`/notebooks/${notebookId}?tab=quiz`}>
