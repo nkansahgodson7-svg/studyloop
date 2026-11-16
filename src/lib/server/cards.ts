@@ -367,9 +367,22 @@ const GENERATE_SYSTEM = [
   `- Produce no more than ${MAX_GENERATE_CARDS} cards.`
 ].join('\n');
 
+export type CardsGenerateEvent =
+  | { type: 'prepared'; total: number; sources: number }
+  | { type: 'checking' }
+  | { type: 'progress'; drafted: number; total: number }
+  | {
+      type: 'done';
+      drafts: Array<{ front: string; back: string; sourceId: number | null }>;
+      skippedDuplicates: number;
+      sourceSummary: string;
+    };
+
 interface GenerateBatchDeps {
   resolveLlmKey?: typeof resolveLlmKey;
   completeBatch?: (apiKey: string, system: string, user: string) => Promise<string>;
+  /** Real progress for the streaming route; nothing is emitted when omitted. */
+  onEvent?: (event: CardsGenerateEvent) => void;
 }
 
 interface ParsedDraft {
@@ -484,6 +497,7 @@ export async function cardsGenerate(
         { status: 400 }
       );
     }
+    deps.onEvent?.({ type: 'prepared', total: count, sources: selections.length });
     const userPrompt = [
       'Material:',
       built.context,
@@ -510,6 +524,7 @@ export async function cardsGenerate(
       throw validationError('GENERATION_INVALID', 'the model did not return usable cards', 502);
     }
 
+    deps.onEvent?.({ type: 'checking' });
     const existing = await db.execute({
       sql: 'SELECT front FROM cards WHERE notebook_id = ?',
       args: [notebookId]
@@ -536,11 +551,10 @@ export async function cardsGenerate(
       }
     }
 
-    return NextResponse.json({
-      drafts,
-      skippedDuplicates,
-      sourceSummary: built.sourceSummary
-    });
+    const payload = { drafts, skippedDuplicates, sourceSummary: built.sourceSummary };
+    deps.onEvent?.({ type: 'progress', drafted: drafts.length, total: count });
+    deps.onEvent?.({ type: 'done', ...payload });
+    return NextResponse.json(payload);
   } catch (error) {
     const known = error as { code?: string };
     if (known.code === 'GENERATION_INVALID') {

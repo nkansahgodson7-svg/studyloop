@@ -2438,6 +2438,20 @@ picture {
   transition: width 320ms var(--ease-out);
 }
 
+.gen__meter.is-indeterminate .gen__fill {
+  width: 38%;
+  animation: gen-sweep 1.5s var(--ease-out) infinite;
+}
+
+@keyframes gen-sweep {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(320%);
+  }
+}
+
 .gen__steps {
   display: grid;
   gap: 10px;

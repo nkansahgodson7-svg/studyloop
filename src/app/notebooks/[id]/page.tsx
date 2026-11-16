@@ -265,7 +265,7 @@ function CardsPanelView({
         <span className="badge badge--neutral">{plural(bundle.cards.length, "card")}</span>
       </div>
       <button className="btn btn--ai btn--block" type="button" onClick={onGenerate}>
-        <Icon name="sparkle" size={17} className="i-sparkle" /> Generate from sources
+        Generate from sources
       </button>
       {bundle.cards.length === 0 ? (
         <div className="empty">

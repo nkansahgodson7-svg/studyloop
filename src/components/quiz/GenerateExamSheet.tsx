@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
+import { GenerationProgress } from "@/components/ui/GenerationProgress";
 import { Icon } from "@/components/ui/icons";
 import { getJson } from "@/lib/client/api";
 import { generateQuiz, type QuizGenerationPhase } from "@/lib/client/quiz";
@@ -21,27 +22,6 @@ interface DetectedChapter {
 }
 
 const DEFAULT_TYPES: QuizKind[] = ["mcq", "multi", "truefalse", "fillin"];
-
-function clock(seconds: number): string {
-  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-}
-
-function Step({
-  state,
-  children
-}: {
-  state: "done" | "active" | "waiting";
-  children: ReactNode;
-}) {
-  return (
-    <li className={`gen__step is-${state}`} aria-current={state === "active" ? "step" : undefined}>
-      <span className="gen__dot" aria-hidden="true">
-        {state === "done" ? <Icon name="check" size={11} /> : null}
-      </span>
-      <span>{children}</span>
-    </li>
-  );
-}
 
 export default function GenerateExamSheetContent({
   notebookId,
@@ -171,42 +151,23 @@ export default function GenerateExamSheetContent({
     }
   }
 
-  const writtenPct =
-    progressTotal > 0 ? Math.min(100, Math.round((written / progressTotal) * 100)) : 0;
-
   const progressBody = (
-    <div className="gen">
-      <div className="gen__head">
-        <p className="gen__title">Writing your exam</p>
-        <div className="gen__meta">
-          <span>
-            {written} of {progressTotal || count} questions
-          </span>
-          <span className="gen__clock">{clock(elapsed)}</span>
-        </div>
-      </div>
-      <div
-        className="gen__meter"
-        role="progressbar"
-        aria-label="Questions written"
-        aria-valuemin={0}
-        aria-valuemax={progressTotal || count}
-        aria-valuenow={written}
-      >
-        <span className="gen__fill" style={{ width: `${writtenPct}%` }} />
-      </div>
-      <p className="sr-only" role="status">
-        {written} of {progressTotal || count} questions written
-      </p>
-      <ol className="gen__steps">
-        <Step state={phase === "reading" ? "active" : "done"}>Read the selected sources</Step>
-        <Step state={phase === "writing" ? "active" : phase === "saving" ? "done" : "waiting"}>
-          Write and check the questions
-        </Step>
-        <Step state={phase === "saving" ? "active" : "waiting"}>Save the exam</Step>
-      </ol>
-      <p className="hint">Usually 15–30 seconds. The exam is saved as soon as it is ready.</p>
-    </div>
+    <GenerationProgress
+      title="Writing your exam"
+      unit="questions"
+      written={written}
+      total={progressTotal || count}
+      elapsedSeconds={elapsed}
+      steps={[
+        { label: "Read the selected sources", state: phase === "reading" ? "active" : "done" },
+        {
+          label: "Write and check the questions",
+          state: phase === "writing" ? "active" : phase === "saving" ? "done" : "waiting"
+        },
+        { label: "Save the exam", state: phase === "saving" ? "active" : "waiting" }
+      ]}
+      hint="Usually 15–30 seconds. The exam is saved as soon as it is ready."
+    />
   );
 
   return (
