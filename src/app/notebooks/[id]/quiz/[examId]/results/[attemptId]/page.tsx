@@ -188,8 +188,7 @@ export default function QuizResultsPage() {
         <div className="card card--flat hstack" style={{ gap: 18, alignItems: "center" }}>
           <Ring pct={pct} size={96} label="score" />
           <div className="stack--6 grow">
-            <p className="h3">{scorePercent(pct)}%</p>
-            <p className="small muted">
+            <p className="h3">
               {Math.round(result.earned * 10) / 10} of {result.max} points
             </p>
             <p className="tiny muted">
@@ -241,7 +240,7 @@ export default function QuizResultsPage() {
                     <span className="tiny muted">
                       {position + 1} · {item.topic || "General"}
                     </span>
-                    <span className="badge">
+                    <span className="badge" style={{ gap: 5 }}>
                       {wrong ? <Icon name="close" size={13} /> : <Icon name="check" size={13} />}
                       {scorePercent(item.score)}%
                     </span>

@@ -14,10 +14,9 @@ import { scorePercent, type QuizExamSummary } from "@/lib/quiz";
 import GenerateExamSheetContent from "@/components/quiz/GenerateExamSheet";
 
 function metaFor(exam: QuizExamSummary): string {
-  const parts = [plural(exam.questionCount, "question")];
-  parts.push(exam.timerMinutes ? `${exam.timerMinutes} min` : "untimed");
-  if (exam.lastAttempt) parts.push(`last ${scorePercent(exam.lastAttempt.score)}%`);
-  return parts.join(" · ");
+  // The score already shows in the trailing badge; repeating it here clips the
+  // meta line at 390 px.
+  return `${plural(exam.questionCount, "question")} · ${exam.timerMinutes ? `${exam.timerMinutes} min` : "untimed"}`;
 }
 
 export default function ExamListPanel({

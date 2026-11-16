@@ -192,7 +192,7 @@ export default function QuizTakePage() {
     );
   }
 
-  function leave() {
+  function goToExam() {
     void (async () => {
       const current = attemptRef.current;
       if (current) {
@@ -201,6 +201,43 @@ export default function QuizTakePage() {
       const href = `/notebooks/${notebookId}/quiz/${examId}`;
       router.push(href);
     })();
+  }
+
+  // Back out of an in-progress exam deliberately: leaving keeps the attempt
+  // resumable, but an accidental tap should not end the session.
+  function leave() {
+    if (!attemptRef.current) {
+      goToExam();
+      return;
+    }
+    sheet.open(
+      <SheetFrame
+        title="Leave the exam?"
+        sub={`${answered} of ${items.length} answered`}
+        body={
+          <p className="small">
+            Your answers are saved on this attempt. You can resume from the exam page whenever you are ready.
+          </p>
+        }
+        foot={
+          <>
+            <button
+              className="btn btn--primary btn--block"
+              type="button"
+              onClick={() => {
+                sheet.close();
+                goToExam();
+              }}
+            >
+              Leave exam
+            </button>
+            <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={() => sheet.close()}>
+              Keep working
+            </button>
+          </>
+        }
+      />
+    );
   }
 
   if (error) {

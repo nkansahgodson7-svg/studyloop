@@ -18,8 +18,12 @@ function attemptMeta(attempt: QuizAttemptSummary): string {
   const date = attempt.submittedAt ? new Date(attempt.submittedAt).toLocaleDateString() : "";
   if (attempt.status === "in_progress") return date || "Started";
   const score = scorePercent(attempt.score);
-  const minutes = attempt.durationMs ? `${Math.max(1, Math.round(attempt.durationMs / 60_000))} min` : "";
-  return [score != null ? `${score}%` : "Not graded", date, minutes].filter(Boolean).join(" · ");
+  const duration = attempt.durationMs
+    ? attempt.durationMs >= 60_000
+      ? `${Math.round(attempt.durationMs / 60_000)} min`
+      : `${Math.max(1, Math.round(attempt.durationMs / 1000))}s`
+    : "";
+  return [score != null ? `${score}%` : "Not graded", date, duration].filter(Boolean).join(" · ");
 }
 
 export default function QuizExamPage() {
@@ -168,6 +172,7 @@ export default function QuizExamPage() {
   const graded = data.attempts.find((attempt) => attempt.status === "graded") ?? null;
   const typeLabels = data.exam.config.types.map((kind) => QUIZ_KIND_LABELS[kind]).join(" · ");
   const cta = active ? "Resume exam" : graded ? "Retake exam" : "Start exam";
+  const ctaShort = active ? "Resume" : graded ? "Retake" : "Start";
 
   return (
     <ScreenSection>
@@ -199,12 +204,12 @@ export default function QuizExamPage() {
           <div>
             <p className="h3">{cta}</p>
             <p className="small muted">
+              {graded ? `Best ${scorePercent(Math.max(...data.attempts.map((a) => a.score ?? 0)))}% · ` : ""}
               {typeLabels || "Mixed questions"}
-              {graded ? ` · best ${scorePercent(Math.max(...data.attempts.map((a) => a.score ?? 0)))}%` : ""}
             </p>
           </div>
           <button className="btn btn--sm btn--primary" type="button" onClick={start}>
-            <Icon name="play" size={15} /> {cta}
+            <Icon name="play" size={15} /> {ctaShort}
           </button>
         </div>
 
