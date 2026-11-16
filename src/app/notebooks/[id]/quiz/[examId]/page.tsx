@@ -171,7 +171,6 @@ export default function QuizExamPage() {
   const active = data.attempts.find((attempt) => attempt.status === "in_progress") ?? null;
   const graded = data.attempts.find((attempt) => attempt.status === "graded") ?? null;
   const typeLabels = data.exam.config.types.map((kind) => QUIZ_KIND_LABELS[kind]).join(" · ");
-  const cta = active ? "Resume exam" : graded ? "Retake exam" : "Start exam";
   const ctaShort = active ? "Resume" : graded ? "Retake" : "Start";
 
   return (
@@ -181,6 +180,14 @@ export default function QuizExamPage() {
           <Icon name="back" />
         </button>
         <span className="topbar__title grow">Mock exam</span>
+        <button
+          className="btn btn--sm btn--primary"
+          type="button"
+          onClick={start}
+          style={{ flex: "none", whiteSpace: "nowrap" }}
+        >
+          <Icon name="play" size={14} /> {ctaShort}
+        </button>
         <button className="icon-btn" type="button" onClick={confirmDelete} aria-label="Delete exam">
           <Icon name="trash" size={19} />
         </button>
@@ -200,17 +207,14 @@ export default function QuizExamPage() {
       </div>
 
       <div className="px stack--16">
-        <div className="card card--flat spread">
-          <div>
-            <p className="h3">{cta}</p>
-            <p className="small muted">
-              {graded ? `Best ${scorePercent(Math.max(...data.attempts.map((a) => a.score ?? 0)))}% · ` : ""}
-              {typeLabels || "Mixed questions"}
-            </p>
-          </div>
-          <button className="btn btn--sm btn--primary" type="button" onClick={start}>
-            <Icon name="play" size={15} /> {ctaShort}
-          </button>
+        <div className="card card--flat">
+          <p className="h3">
+            {active ? "Resume where you left off" : graded ? "Retake anytime" : "Ready when you are"}
+          </p>
+          <p className="small muted">
+            {graded ? `Best ${scorePercent(Math.max(...data.attempts.map((a) => a.score ?? 0)))}% · ` : ""}
+            {typeLabels || "Mixed questions"}
+          </p>
         </div>
 
         {active ? (

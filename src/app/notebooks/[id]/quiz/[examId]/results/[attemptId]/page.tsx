@@ -73,7 +73,12 @@ export default function QuizResultsPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"missed" | "grade" | null>(null);
 
-  const goBack = useSmartBack(`/notebooks/${notebookId}?tab=quiz`, (from) => from === `/notebooks/${notebookId}`);
+  // Results belong to the exam, so back returns there instead of skipping the
+  // quiz overview on the way to the notebook.
+  const goBack = useSmartBack(
+    `/notebooks/${notebookId}/quiz/${examId}`,
+    (from) => from === `/notebooks/${notebookId}/quiz/${examId}`
+  );
 
   const load = useCallback(async () => {
     if (!Number.isInteger(attemptId)) {
@@ -177,7 +182,7 @@ export default function QuizResultsPage() {
   return (
     <ScreenSection>
       <div className="topbar">
-        <button className="icon-btn" type="button" onClick={goBack} aria-label="Back to quiz">
+        <button className="icon-btn" type="button" onClick={goBack} aria-label="Back to exam">
           <Icon name="back" />
         </button>
         <span className="topbar__title grow">Results</span>

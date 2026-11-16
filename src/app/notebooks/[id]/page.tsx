@@ -342,9 +342,12 @@ export default function NotebookScreen() {
     ) {
       return false;
     }
-    // Chat is a child of this notebook, never its parent; returning there
-    // creates a notebook → chat → notebook back-button loop.
-    return !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from);
+    // Chat and quiz screens are children of this notebook, never its parent;
+    // returning to them would make notebook back bounce into a child.
+    return (
+      !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from) &&
+      !/^\/notebooks\/\d+\/quiz(?:\/|$)/.test(from)
+    );
   });
 
   useEffect(() => {
