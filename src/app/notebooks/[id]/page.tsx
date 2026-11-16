@@ -14,6 +14,7 @@ import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
 import ExamListPanel from "@/components/quiz/ExamListPanel";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
+import { scorePercent } from "@/lib/quiz";
 import { authRedirectFor } from "@/lib/client/api";
 import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
@@ -630,6 +631,7 @@ export default function NotebookScreen() {
             due={due}
             onAdd={openAddSource}
             onReview={startReview}
+            onQuiz={() => chooseTab("quiz")}
             onDeleteSource={handleSourceDeleted}
           />
         ) : tab === "chat" ? (
@@ -667,12 +669,14 @@ function OverviewPanelView({
   due,
   onAdd,
   onReview,
+  onQuiz,
   onDeleteSource
 }: {
   bundle: NotebookBundle;
   due: number;
   onAdd: () => void;
   onReview: () => void;
+  onQuiz: () => void;
   onDeleteSource: () => void;
 }) {
   return (
@@ -688,6 +692,24 @@ function OverviewPanelView({
           {due ? "Review" : "Practice"}
         </button>
       </div>
+
+      {bundle.lastQuiz ? (
+        <button className="row" type="button" onClick={onQuiz} aria-label="Open mock exams">
+          <span className="row__tile tone-sky" aria-hidden="true">
+            <Icon name="review" size={18} />
+          </span>
+          <span className="row__main">
+            <span className="row__title">{bundle.lastQuiz.title}</span>
+            <span className="row__meta">
+              Latest mock exam · {scorePercent(bundle.lastQuiz.score)}%{" "}
+              {bundle.lastQuiz.at ? `· ${new Date(bundle.lastQuiz.at).toLocaleDateString()}` : ""}
+            </span>
+          </span>
+          <span className="row__trail">
+            <Icon name="chevron" size={18} />
+          </span>
+        </button>
+      ) : null}
 
       <section>
         <div className="section-head">

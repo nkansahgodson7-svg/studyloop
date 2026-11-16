@@ -18,6 +18,7 @@ import {
   submitQuizAttempt
 } from "@/lib/client/quiz";
 import { scorePercent, type QuizAttemptResult, type QuizBreakdownRow } from "@/lib/quiz";
+import { invalidateNotebook } from "@/lib/client/notebook-data";
 
 function formatDuration(ms: number | null): string {
   if (!ms) return "";
@@ -119,6 +120,7 @@ export default function QuizResultsPage() {
     setBusy("grade");
     try {
       await submitQuizAttempt(result.attempt.id);
+      invalidateNotebook(notebookId);
       await load();
       toast("Exam graded");
     } catch (err) {

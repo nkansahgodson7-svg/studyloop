@@ -1,7 +1,7 @@
 import type { Client } from '@libsql/client';
 import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from './auth';
-import { ownNotebook } from './notebooks';
+import { lastQuizForNotebook, ownNotebook } from './notebooks';
 import { listSources } from './ingest/ingest';
 import { listCardBatches, listCardsWithReview } from './cards';
 
@@ -17,10 +17,11 @@ export async function notebookBundle(db: Client, req: Request, idRaw: string): P
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
     }
 
-    const [sources, cards, batches] = await Promise.all([
+    const [sources, cards, batches, lastQuiz] = await Promise.all([
       listSources(db, notebookId),
       listCardsWithReview(db, notebookId),
-      listCardBatches(db, notebookId)
+      listCardBatches(db, notebookId),
+      lastQuizForNotebook(db, notebookId)
     ]);
 
     return NextResponse.json({
@@ -28,7 +29,8 @@ export async function notebookBundle(db: Client, req: Request, idRaw: string): P
       title: notebook.title,
       sources,
       cards,
-      batches
+      batches,
+      lastQuiz
     });
   } catch (error) {
     return errorResponse(error);

@@ -45,12 +45,38 @@ export async function listNotebooks(db: Client, userId: number): Promise<Noteboo
   return result.rows.map(rowToNotebook);
 }
 
+export interface LastQuiz {
+  examId: number;
+  title: string;
+  score: number;
+  at: string;
+}
+
 export interface NotebookViewRow {
   notebook: NotebookRow;
   sources: number;
   cards: number;
   due: number;
   lastQuiz: { examId: number; score: number; at: string } | null;
+}
+
+/** The most recently graded attempt in a notebook, for "latest score" display. */
+export async function lastQuizForNotebook(db: Client, notebookId: number): Promise<LastQuiz | null> {
+  const result = await db.execute({
+    sql: `SELECT a.exam_id, a.score, a.submitted_at, e.title
+            FROM quiz_exam_attempts a JOIN quiz_exams e ON e.id = a.exam_id
+           WHERE e.notebook_id = ? AND a.status = 'graded' AND a.score IS NOT NULL
+           ORDER BY a.submitted_at DESC, a.id DESC LIMIT 1`,
+    args: [notebookId]
+  });
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    examId: Number(row.exam_id),
+    title: String(row.title),
+    score: Number(row.score),
+    at: String(row.submitted_at ?? '')
+  };
 }
 
 export async function listNotebookViews(

@@ -16,6 +16,7 @@ import {
   type QuizExamMeta
 } from "@/lib/client/quiz";
 import type { QuizAnswers, QuizKind, QuizPublicItem } from "@/lib/quiz";
+import { invalidateNotebook } from "@/lib/client/notebook-data";
 
 function formatClock(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
@@ -110,6 +111,8 @@ export default function QuizTakePage() {
       try {
         await saveQuizAnswers(current.id, answersRef.current).catch(() => undefined);
         await submitQuizAttempt(current.id);
+        // The Overview shows the latest score, so do not serve a stale bundle.
+        invalidateNotebook(notebookId);
         if (auto) toast("Time is up — exam submitted");
         router.replace(resultsHref(current.id));
       } catch (err) {

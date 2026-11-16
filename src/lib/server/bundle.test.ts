@@ -104,6 +104,29 @@ describe('notebook bundle', () => {
     expect(body).not.toHaveProperty('messages');
   });
 
+  it('includes the latest graded quiz so the notebook can show a score', async () => {
+    const exam = await db.execute({
+      sql: 'INSERT INTO quiz_exams (notebook_id, title) VALUES (?, ?)',
+      args: [notebookId, 'Alkenes check']
+    });
+    const examId = Number(exam.lastInsertRowid);
+    await db.execute({
+      sql: `INSERT INTO quiz_exam_attempts (exam_id, user_id, status, started_at, submitted_at, score)
+            VALUES (?, ?, 'graded', ?, ?, ?)`,
+      args: [examId, ownerId, '2026-11-15T10:00:00.000Z', '2026-11-15T10:10:00.000Z', 0.72]
+    });
+
+    const res = await notebookBundle(
+      db,
+      await reqWithCookie(`http://x/api/notebooks/${notebookId}/bundle`, token),
+      String(notebookId)
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { lastQuiz: { examId: number; title: string; score: number; at: string } };
+    expect(body.lastQuiz).toMatchObject({ examId, title: 'Alkenes check', score: 0.72 });
+    expect(body.lastQuiz.at).toBe('2026-11-15T10:10:00.000Z');
+  });
+
   it('rejects foreign, invalid, and unauthenticated requests', async () => {
     const other = await userWithToken(db, 'bundle.other@test.local');
     const foreign = await notebookBundle(
