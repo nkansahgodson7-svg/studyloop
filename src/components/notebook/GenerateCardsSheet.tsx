@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { SheetFrame } from "@/components/ui/Sheet";
-import { Icon } from "@/components/ui/icons";
+import { GenerationProgress } from "@/components/ui/GenerationProgress";
 import { getJson } from "@/lib/client/api";
+import { generateCards, type CardGenerationPhase } from "@/lib/client/cards";
 import type { NotebookSource } from "@/lib/client/notebook-data";
 
 interface DetectedChapter {
@@ -52,6 +53,23 @@ export default function GenerateCardsSheetContent({
   const [skippedDuplicates, setSkippedDuplicates] = useState(0);
   const [busy, setBusy] = useState<"generate" | "commit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<CardGenerationPhase | null>(null);
+  const [drafted, setDrafted] = useState(0);
+  const [progressTotal, setProgressTotal] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+
+  // Elapsed time only; the phases themselves come from server events.
+  useEffect(() => {
+    if (busy !== "generate") return;
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - startedAt) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+
+  useEffect(() => {
+    if (!error) return;
+    document.querySelector<HTMLElement>(".sheet__body")?.scrollTo({ top: 0 });
+  }, [error]);
 
   const pagedSources = useMemo(() => sources.filter((source) => (source.pageCount ?? 0) > 0), [sources]);
   const selectedDrafts = drafts.filter((draft) => draft.selected);
@@ -158,41 +176,41 @@ export default function GenerateCardsSheetContent({
     const selection = buildSelection();
     if (!selection) return;
     setBusy("generate");
+    setPhase("reading");
+    setDrafted(0);
+    setProgressTotal(count);
+    setElapsed(0);
     try {
-      const res = await fetch(`/api/notebooks/${notebookId}/cards/generate`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
+      const body = await generateCards(
+        notebookId,
+        {
           sources: selection,
           count,
           ...(focus.trim() ? { focus: focus.trim() } : {})
-        })
-      });
-      const body = (await res.json().catch(() => null)) as {
-        error?: string;
-        drafts?: Array<{ front?: unknown; back?: unknown; sourceId?: unknown }>;
-        skippedDuplicates?: unknown;
-        sourceSummary?: unknown;
-      } | null;
-      if (!res.ok) {
-        setError(body?.error ?? `Could not generate cards (${res.status})`);
-        return;
-      }
-      const nextDrafts: DraftItem[] = (body?.drafts ?? [])
+        },
+        (progress) => {
+          setPhase(progress.phase);
+          setDrafted(progress.drafted);
+          setProgressTotal(progress.total);
+        }
+      );
+      const nextDrafts: DraftItem[] = body.drafts
         .map((draft, index) => ({
           key: index,
-          front: typeof draft.front === "string" ? draft.front : "",
-          back: typeof draft.back === "string" ? draft.back : "",
-          sourceId: typeof draft.sourceId === "number" ? draft.sourceId : null,
+          front: draft.front,
+          back: draft.back,
+          sourceId: draft.sourceId,
           selected: true
         }))
         .filter((draft) => draft.front.length > 0 && draft.back.length > 0);
       setDrafts(nextDrafts);
-      setSkippedDuplicates(typeof body?.skippedDuplicates === "number" ? body.skippedDuplicates : 0);
-      setSourceSummary(typeof body?.sourceSummary === "string" ? body.sourceSummary : "Selected sources");
+      setSkippedDuplicates(body.skippedDuplicates);
+      setSourceSummary(body.sourceSummary || "Selected sources");
       setStep("preview");
-    } catch {
-      setError("Network error — try again.");
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      setError(status ? (err as Error).message : "Network error — try again.");
+      setPhase(null);
     } finally {
       setBusy(null);
     }
@@ -245,6 +263,12 @@ export default function GenerateCardsSheetContent({
 
   const configBody = (
     <div className="stack--16">
+      {error ? (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
       <div className="field">
         <span className="label">Sources</span>
         <div className="stack--8">
@@ -361,12 +385,6 @@ export default function GenerateCardsSheetContent({
           ))}
         </div>
       </div>
-
-      {error ? (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 
@@ -436,30 +454,61 @@ export default function GenerateCardsSheetContent({
     </div>
   );
 
+  const progressBody = (
+    <GenerationProgress
+      title="Drafting your cards"
+      unit="cards"
+      written={drafted}
+      total={progressTotal || count}
+      elapsedSeconds={elapsed}
+      indeterminate={drafted === 0}
+      steps={[
+        { label: "Read the selected sources", state: phase === "reading" ? "active" : "done" },
+        {
+          label: "Draft the cards",
+          state: phase === "writing" ? "active" : phase === "checking" ? "done" : "waiting"
+        },
+        { label: "Check for duplicates", state: phase === "checking" ? "active" : "waiting" }
+      ]}
+      hint="Usually 5–15 seconds. Nothing is saved until you pick the drafts to keep."
+    />
+  );
+
+  const generating = busy === "generate";
+
   return (
     <SheetFrame
-      title={step === "configure" ? "Generate cards" : "Review drafts"}
-      sub={step === "configure" ? "Choose sources, pages, and focus." : sourceSummary || "Edit and pick the cards to keep."}
-      body={step === "configure" ? configBody : previewBody}
+      title={generating ? "Drafting cards" : step === "configure" ? "Generate cards" : "Review drafts"}
+      sub={
+        generating
+          ? "Reading your selected sources."
+          : step === "configure"
+            ? "Choose sources, pages, and focus."
+            : sourceSummary || "Edit and pick the cards to keep."
+      }
+      body={generating ? progressBody : step === "configure" ? configBody : previewBody}
       foot={
-        step === "configure" ? (
+        generating ? (
+          <>
+            <button className="btn btn--ai btn--block" type="button" disabled aria-busy>
+              <span className="spinner" />
+              {phase === "reading"
+                ? "Reading sources…"
+                : phase === "checking"
+                  ? "Checking duplicates…"
+                  : "Drafting cards…"}
+            </button>
+            <p className="tiny muted center">Keep this sheet open — drafts appear when they are ready.</p>
+          </>
+        ) : step === "configure" ? (
           <>
             <button
               className="btn btn--ai btn--block"
               type="button"
               disabled={busy !== null || selected.size === 0}
-              aria-busy={busy === "generate"}
               onClick={() => void generate()}
             >
-              {busy === "generate" ? (
-                <>
-                  <span className="spinner" /> Drafting cards…
-                </>
-              ) : (
-                <>
-                  <Icon name="sparkle" size={17} className="i-sparkle" /> Generate preview
-                </>
-              )}
+              {error ? "Try again" : `Generate ${count} cards`}
             </button>
             <p className="tiny muted center">One pass over every selected source. Nothing is saved yet.</p>
           </>
@@ -498,7 +547,7 @@ export default function GenerateCardsSheetContent({
                 disabled={busy !== null}
                 onClick={() => void generate()}
               >
-                {busy === "generate" ? "Regenerating…" : "Regenerate"}
+                Regenerate
               </button>
             </div>
           </>

@@ -34,6 +34,10 @@ describe('youtube()', () => {
     expect(extractVideoId('https://www.youtube.com/watch?v=abc123XYZ_-')).toBe('abc123XYZ_-');
     expect(extractVideoId('https://youtu.be/abc123XYZ_-')).toBe('abc123XYZ_-');
     expect(extractVideoId('https://www.youtube.com/watch?v=abc123XYZ_-&t=120s')).toBe('abc123XYZ_-');
+    expect(extractVideoId('https://www.youtube.com/live/abc123XYZ_-')).toBe('abc123XYZ_-');
+    expect(extractVideoId('https://www.youtube.com/embed/abc123XYZ_-?autoplay=1')).toBe('abc123XYZ_-');
+    expect(extractVideoId('https://www.youtube.com/shorts/abc123XYZ_-')).toBe('abc123XYZ_-');
+    expect(extractVideoId('https://www.youtube-nocookie.com/embed/abc123XYZ_-')).toBe('abc123XYZ_-');
     expect(extractVideoId('https://evil.com/watch?v=abc')).toBeNull();
     expect(extractVideoId('not a url')).toBeNull();
   });
@@ -91,6 +95,21 @@ describe('youtube()', () => {
       throw Object.assign(new Error('no transcript available'), { code: 'NO_TRANSCRIPT' });
     });
     expect(res.status).toBe(502);
+  });
+
+  it('explains a bot check instead of echoing YouTube’s raw reason', async () => {
+    const res = await youtubeSourceCreate(db, await new Request(`http://x/api/notebooks/${notebookId}/sources`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: `sl_session=${token}` },
+      body: JSON.stringify({ url: 'https://youtu.be/bot00000000' })
+    }), String(notebookId), async () => {
+      throw Object.assign(new Error("Sign in to confirm you're not a bot."), { code: 'BOT_CHECK' });
+    });
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.code).toBe('BOT_CHECK');
+    expect(body.error).toContain('blocking transcript requests');
+    expect(body.error).toContain('Paste text');
   });
 
   it('rejects ingest for a foreign notebook with 404', async () => {

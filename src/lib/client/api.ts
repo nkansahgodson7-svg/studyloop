@@ -71,5 +71,6 @@ export interface NotebookView {
   sources: number;
   cards: number;
   due: number;
+  lastQuiz?: { examId: number; score: number; at: string } | null;
 }
 

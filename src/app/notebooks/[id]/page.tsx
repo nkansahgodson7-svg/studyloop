@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { ScreenSection } from "@/components/ui/ScreenSection";
 import { Icon, TONES, plural } from "@/components/ui/icons";
+import { RowSkeletonList, Skeleton } from "@/components/ui/Skeleton";
 import { useSheet } from "@/components/ui/Sheet";
 import { useToast } from "@/components/ui/Toast";
 import { SheetFrame } from "@/components/ui/Sheet";
@@ -11,13 +12,15 @@ import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
 import ChatListPanel from "@/components/chat/ChatListPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
+import ExamListPanel from "@/components/quiz/ExamListPanel";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
+import { scorePercent } from "@/lib/quiz";
 import { authRedirectFor } from "@/lib/client/api";
 import { startOptimisticNav } from "@/lib/client/optimistic-nav";
 import { notebookViewsCache, summaryCache } from "@/lib/client/cache";
 import { useSmartBack } from "@/lib/client/history";
 
-type Tab = "overview" | "chat" | "cards";
+type Tab = "overview" | "chat" | "cards" | "quiz";
 
 /**
  * `bundle === null` alone cannot tell "still fetching" from "no such notebook",
@@ -262,7 +265,7 @@ function CardsPanelView({
         <span className="badge badge--neutral">{plural(bundle.cards.length, "card")}</span>
       </div>
       <button className="btn btn--ai btn--block" type="button" onClick={onGenerate}>
-        <Icon name="sparkle" size={17} className="i-sparkle" /> Generate from sources
+        Generate from sources
       </button>
       {bundle.cards.length === 0 ? (
         <div className="empty">
@@ -339,14 +342,17 @@ export default function NotebookScreen() {
     ) {
       return false;
     }
-    // Chat is a child of this notebook, never its parent; returning there
-    // creates a notebook → chat → notebook back-button loop.
-    return !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from);
+    // Chat and quiz screens are children of this notebook, never its parent;
+    // returning to them would make notebook back bounce into a child.
+    return (
+      !/^\/notebooks\/\d+\/chat(?:\/|$)/.test(from) &&
+      !/^\/notebooks\/\d+\/quiz(?:\/|$)/.test(from)
+    );
   });
 
   useEffect(() => {
     const value = search.get("tab");
-    if (value === "overview" || value === "chat" || value === "cards") setTab(value);
+    if (value === "overview" || value === "chat" || value === "cards" || value === "quiz") setTab(value);
   }, [search]);
 
   function chooseTab(value: Tab) {
@@ -502,12 +508,39 @@ export default function NotebookScreen() {
           </button>
           <span className="topbar__title grow">Notebook</span>
         </div>
-        <div className="px stack--16" style={{ marginTop: 6 }} role="status" aria-busy="true">
+        {/* Mirrors the overview layout (hero, segmented tabs, summary card,
+            sources) so the load reads as one screen settling in, not a jump
+            from a generic placeholder. */}
+        <div role="status" aria-busy="true">
           <span className="sr-only">Opening notebook…</span>
-          <div className="skeleton" style={{ height: 96 }} />
-          <div className="skeleton" style={{ height: 44 }} />
-          <div className="skeleton" style={{ height: 68 }} />
-          <div className="skeleton" style={{ height: 68 }} />
+          <div className="nb-hero">
+            <Skeleton height={58} width={58} radius="18px" />
+            <div className="nb-hero__main">
+              <Skeleton height={24} width={168} radius="var(--r-sm)" />
+              <Skeleton height={11} width={132} />
+            </div>
+          </div>
+          <div className="px">
+            <div className="segmented">
+              <Skeleton height={44} radius="var(--r-pill)" />
+              <Skeleton height={44} radius="var(--r-pill)" />
+              <Skeleton height={44} radius="var(--r-pill)" />
+              <Skeleton height={44} radius="var(--r-pill)" />
+            </div>
+          </div>
+          <div className="tabpanel px stack--16">
+            <div className="card card--flat spread">
+              <div className="stack--6">
+                <Skeleton height={16} width={112} />
+                <Skeleton height={11} width={152} />
+              </div>
+              <Skeleton height={34} width={86} radius="var(--r-pill)" />
+            </div>
+            <div className="section-head">
+              <h2>Sources</h2>
+            </div>
+            <RowSkeletonList count={2} />
+          </div>
         </div>
       </ScreenSection>
     );
@@ -548,7 +581,8 @@ export default function NotebookScreen() {
   const tabs: Array<[Tab, string]> = [
     ["overview", "Overview"],
     ["chat", "Chat"],
-    ["cards", "Cards"]
+    ["cards", "Cards"],
+    ["quiz", "Quiz"]
   ];
 
   return (
@@ -600,6 +634,7 @@ export default function NotebookScreen() {
             due={due}
             onAdd={openAddSource}
             onReview={startReview}
+            onQuiz={() => chooseTab("quiz")}
             onDeleteSource={handleSourceDeleted}
           />
         ) : tab === "chat" ? (
@@ -608,7 +643,7 @@ export default function NotebookScreen() {
             notebookTitle={bundle.title}
             hasSources={bundle.sources.length > 0}
           />
-        ) : (
+        ) : tab === "cards" ? (
           <CardsPanelView
             bundle={bundle}
             onReview={startReview}
@@ -624,6 +659,8 @@ export default function NotebookScreen() {
             }}
             onGenerate={handleGenerate}
           />
+        ) : (
+          <ExamListPanel notebookId={id} notebookTitle={bundle.title} sources={bundle.sources} />
         )}
       </div>
     </ScreenSection>
@@ -635,12 +672,14 @@ function OverviewPanelView({
   due,
   onAdd,
   onReview,
+  onQuiz,
   onDeleteSource
 }: {
   bundle: NotebookBundle;
   due: number;
   onAdd: () => void;
   onReview: () => void;
+  onQuiz: () => void;
   onDeleteSource: () => void;
 }) {
   return (
@@ -656,6 +695,24 @@ function OverviewPanelView({
           {due ? "Review" : "Practice"}
         </button>
       </div>
+
+      {bundle.lastQuiz ? (
+        <button className="row" type="button" onClick={onQuiz} aria-label="Open mock exams">
+          <span className="row__tile tone-sky" aria-hidden="true">
+            <Icon name="review" size={18} />
+          </span>
+          <span className="row__main">
+            <span className="row__title">{bundle.lastQuiz.title}</span>
+            <span className="row__meta">
+              Latest mock exam · {scorePercent(bundle.lastQuiz.score)}%{" "}
+              {bundle.lastQuiz.at ? `· ${new Date(bundle.lastQuiz.at).toLocaleDateString()}` : ""}
+            </span>
+          </span>
+          <span className="row__trail">
+            <Icon name="chevron" size={18} />
+          </span>
+        </button>
+      ) : null}
 
       <section>
         <div className="section-head">

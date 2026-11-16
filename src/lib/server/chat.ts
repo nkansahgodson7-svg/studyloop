@@ -1,7 +1,7 @@
 import type { Client } from '@libsql/client';
 import { NextResponse } from 'next/server';
 import { errorResponse, requireUser } from './auth';
-import { loadUserPlainKey } from './llmkey';
+import { resolveLlmKey } from './llm-key';
 import { listSources, searchChunks, type ChunkHit } from './ingest/ingest';
 import { LLM_CHAT_LIMIT, rateLimitResponse } from './ratelimit';
 import { CHAT_QUESTION_MAX } from '../chat-limits';
@@ -22,6 +22,8 @@ import {
   type SourceRef
 } from './conversations';
 import { generateConversationTitle } from './chat-title';
+import { maybeQuizTurn } from './chat-quiz';
+import type { QuizGenerateDeps } from './quiz-generate';
 
 export { CHAT_QUESTION_MAX };
 export const SEARCH_K = 5;
@@ -59,16 +61,11 @@ export interface ChatDeps {
     apiKey: string,
     userId: number
   ) => Promise<void>;
+  /** Inline chat quizzes; tests inject the batch writer here. */
+  quiz?: Partial<QuizGenerateDeps>;
 }
 
-export async function resolveLlmKey(db: Client, userId: number): Promise<string | null> {
-  const personal = await loadUserPlainKey(db, userId);
-  if (personal && personal.trim().length > 0) {
-    return personal;
-  }
-  const envKey = process.env.GROQ_API_KEY;
-  return envKey && envKey.trim().length > 0 ? envKey : null;
-}
+export { resolveLlmKey } from './llm-key';
 
 export const GROUNDING_RULES = [
   'Grounding contract:',
@@ -491,6 +488,13 @@ async function startTurn(
       );
       userMessage = await createMessage(db, conversation.id, { role: 'user', content: text });
       await touchConversation(db, conversation.id);
+      const quizTurn = await maybeQuizTurn(
+        db,
+        req,
+        { conversation, userMessage, apiKey, userId: user.id },
+        { quiz: deps.quiz, genTitle: deps.genTitle ?? generateConversationTitle }
+      );
+      if (quizTurn) return quizTurn;
       return answerTurn(
         db,
         req,
@@ -561,6 +565,13 @@ async function startTurn(
       HISTORY_TURNS,
       HISTORY_CHARS
     );
+    const quizTurn = await maybeQuizTurn(
+      db,
+      req,
+      { conversation, userMessage, apiKey, userId: user.id },
+      { quiz: deps.quiz, genTitle: deps.genTitle ?? generateConversationTitle }
+    );
+    if (quizTurn) return quizTurn;
     return answerTurn(
       db,
       req,

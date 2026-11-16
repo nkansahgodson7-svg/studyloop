@@ -56,13 +56,20 @@ exit criterion.
 - [x] Task 6: Notebooks CRUD per user + notebook list/switch UI (commit afe83dd)
 - [x] Task 7: Source ingest core — chunker + FTS5 indexing + text source (paste) (commit 242a20d)
 - [x] Task 8: PDF source — pdfjs client extraction → text payload → ingest core (commit ebd5e73)
-- [x] Task 9: YouTube source — URL → `youtubei.js` transcript → ingest core. LIVE fetch blocked 2026-10-24: YouTube times out datacenter egress (timedtext 200 + empty body for all formats; get_transcript 400 "Precondition check failed" = poToken guard, latest lib 18.3.0 included). DI fetcher design means the code path is fully testable and the UI degrades to a clear 502 banner; manual paste-transcript fallback is already available (Add a text source). Deployed egress may behave differently; revisit with PoToken/residential egress if needed.
+- [x] Task 9: YouTube source — URL → transcript → ingest core. Fixed 2026-11-15: the web player's caption URLs now carry `exp=xpe` (PoToken guard) and return an empty 200 outside a real browser, and `/youtubei/v1/get_transcript` returns 400 "Precondition check failed". Ingestion now asks InnerTube's `/youtubei/v1/player` as the iOS (then Android) client, whose caption URLs are plain signed timedtext links, then  fetches `fmt=json3`. The watch-page and `youtubei.js` paths remain as fallbacks. Client order is
+  IOS → ANDROID → ANDROID_VR → TVHTML5/embedded, and a `LOGIN_REQUIRED` bot check is
+  no longer terminal (it says the server IP is challenged, not that the video lacks
+  captions): the next client and fallbacks are tried, and only if all fail does the
+  route answer 502 `BOT_CHECK` with actionable copy (add the transcript via Paste
+  text). `/shorts/`, `/live/`, `/embed/`, `/v/` and `youtube-nocookie.com` URLs are
+  accepted. Live smoke passes for multiple public videos; DI fetcher tests cover the
+  parsers, client fallback, and failure codes.
 
 ### Checkpoint: Sources
 - [x] A notebook has a PDF, a paste, and a YouTube source path; FTS search returns
   the right chunks for keyword queries (tested — PDF E2E 'calvin' match 2026-10-24).
-  Deviation: live YouTube ingestion is blocked in this environment (see Task 9);
-  verified via DI-fetched unit tests + UI 502 degradation instead.
+  Live YouTube ingestion verified 2026-11-15 via the mobile-player caption
+  path (see Task 9).
 
 ### Phase 4: Grounded Chat
 
@@ -100,12 +107,28 @@ exit criterion.
 
 ### Phase 6: Quiz (questions + AI grading)
 
-- [ ] Task 14: Quiz generation — topic-scoped, streamed batches ≤ 6 items,
-  stored as `quiz_items`
-- [ ] Task 15: Quiz play + AI grading — answer flow, AI-graded score saved
+Spec: `tasks/quiz-spec.md` (decisions confirmed 2026-11-16). Saved mock exams in a
+4th notebook tab, selectable question types, optional timer, exam-mode feedback,
+AI partial credit for short answers, attempt history + resume, and a topic
+breakdown. Supersedes the original `quiz_items`/`quiz_attempts` sketch and the
+obsolete 120b model pin (the llama deployments are gone; model is
+`GROQ_QUIZ_MODEL ?? GROQ_MODEL`).
+
+- [x] Task 14: Quiz data layer + generation — new `quiz_exams`,
+  `quiz_exam_items`, `quiz_exam_attempts` tables; shared generation material
+  extracted from `cards.ts`; mixed-type batches ≤ 6 items with a 40 s deadline
+  and partial results — done 2026-11-16 (`repo: src/lib/server/quiz.ts`,
+  `quiz-generate.ts`, `quiz-prompt.ts`; 20 generation tests)
+- [x] Task 15: Quiz play + AI grading — one active attempt per exam, resume,
+  timer auto-submit, auto grading for objective items, one batched AI grading
+  call for short answers, results + breakdown + missed→flashcards — done
+  2026-11-16 (`quiz-grade.ts`, `quiz-api.ts`, API routes, 4th notebook tab,
+  exam/take/results screens, Home + Review `lastQuiz`)
 
 ### Checkpoint: Quiz
-- [ ] Generate ≥ 8 items from a topic → play → AI grades (mocked tests + manual)
+- [x] Generate ≥ 8 items from a topic → play → AI grades (mocked tests + manual) —
+  generation, grading, submit/resume and missed→cards covered by tests; full
+  gate green; live AI run still worth one manual pass on the preview URL
 
 ### Phase 7: Ship
 
