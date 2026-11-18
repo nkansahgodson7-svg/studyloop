@@ -21,7 +21,10 @@ export interface ExtractedPdf {
   pages: string[];
 }
 
-export async function extractPdfText(data: ArrayBuffer): Promise<ExtractedPdf> {
+export async function extractPdfText(
+  data: ArrayBuffer,
+  onProgress?: (done: number, total: number) => void
+): Promise<ExtractedPdf> {
   const pdfjs = await loadPdfjs();
   const task = pdfjs.getDocument({ data: new Uint8Array(data) });
   let pdf: PDFDocumentProxy;
@@ -45,6 +48,7 @@ export async function extractPdfText(data: ArrayBuffer): Promise<ExtractedPdf> {
       .filter(Boolean)
       .join(' ');
     pageTexts.push(line.trim());
+    onProgress?.(pageNumber, pdf.numPages);
   }
   const pageCount = pdf.numPages;
   await task.destroy();

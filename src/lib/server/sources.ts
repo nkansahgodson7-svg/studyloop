@@ -5,7 +5,7 @@ import { ownNotebook } from './notebooks';
 import { ingestTextSource, listSources, SOURCE_KINDS, type IngestableKind } from './ingest/ingest';
 import { detectChapters } from './ingest/pages';
 import { extractPptText } from './ingest/ppt';
-import { signedSourceFileUrl, storeSourceFile } from './source-files';
+import { downloadSourceFileByCustomId, signedSourceFileUrl, storeSourceFile } from './source-files';
 import { INGEST_LIMIT, rateLimitResponse } from './ratelimit';
 
 const MAX_SOURCE_TEXT = 2_000_000;
@@ -118,6 +118,46 @@ export async function textSourceCreate(db: Client, req: Request, idRaw: string):
 
 const MAX_PPT_BYTES = 4 * 1024 * 1024;
 
+/** Parses legacy .ppt bytes, indexes the slides and keeps the original file. */
+async function ingestLegacyPpt(
+  db: Client,
+  input: {
+    notebookId: number;
+    userId: number;
+    bytes: Uint8Array<ArrayBuffer>;
+    name: string;
+    fileKey: string | null;
+  }
+): Promise<NextResponse> {
+  let extracted: ReturnType<typeof extractPptText>;
+  try {
+    extracted = extractPptText(input.bytes);
+  } catch {
+    return NextResponse.json(
+      { error: 'Could not read that PowerPoint file (it may be password-protected or corrupt).' },
+      { status: 400 }
+    );
+  }
+  if (extracted.pages.every((p) => p.trim().length === 0)) {
+    return NextResponse.json({ error: 'no extractable text in this presentation' }, { status: 400 });
+  }
+  const result = await ingestTextSource(db, {
+    notebookId: input.notebookId,
+    userId: input.userId,
+    title: input.name,
+    pages: extracted.pages,
+    kind: 'ppt',
+    fileKey: input.fileKey
+  });
+  if (extracted.pageCount > 0) {
+    await db.execute({
+      sql: 'UPDATE sources SET meta = ? WHERE id = ?',
+      args: [`${extracted.pageCount} slides · ${result.chunks} chunks`, result.id]
+    });
+  }
+  return NextResponse.json(result, { status: 201 });
+}
+
 export async function pptSourceCreate(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
   try {
     const user = await requireUser(db, req);
@@ -132,6 +172,36 @@ export async function pptSourceCreate(db: Client, req: Request, idRaw: string): 
     const limited = await rateLimitResponse(db, `ingest:${user.id}`, INGEST_LIMIT);
     if (limited) return limited;
 
+    // Big decks cannot fit in a request body (the host caps it at 4.5 MB), so
+    // the client uploads to storage first and only sends the upload's id.
+    if ((req.headers.get('content-type') ?? '').includes('application/json')) {
+      const body = (await req.json().catch(() => null)) as { customId?: unknown; title?: unknown } | null;
+      const customId = typeof body?.customId === 'string' ? body.customId : '';
+      // The id is minted server-side as `<userId>-<uuid>` at upload time, so a
+      // prefix match proves the file was uploaded by this user.
+      if (!customId.startsWith(`${user.id}-`)) {
+        return NextResponse.json({ error: 'invalid upload' }, { status: 400 });
+      }
+      const name = (typeof body?.title === 'string' ? body.title : '').trim() || 'presentation.ppt';
+      if (!name.toLowerCase().endsWith('.ppt')) {
+        return NextResponse.json({ error: 'only .ppt files are accepted here' }, { status: 400 });
+      }
+      const stored = await downloadSourceFileByCustomId(customId);
+      if (!stored) {
+        return NextResponse.json(
+          { error: 'That upload could not be read — save the deck as .pptx and upload that.' },
+          { status: 404 }
+        );
+      }
+      return ingestLegacyPpt(db, {
+        notebookId,
+        userId: user.id,
+        bytes: stored.bytes,
+        name,
+        fileKey: stored.key
+      });
+    }
+
     const form = await req.formData();
     const file = form.get('file');
     if (!(file instanceof File)) {
@@ -144,35 +214,9 @@ export async function pptSourceCreate(db: Client, req: Request, idRaw: string): 
     if (file.size > MAX_PPT_BYTES) {
       return NextResponse.json({ error: 'PowerPoint file too large (max 4 MB)' }, { status: 413 });
     }
-    const buffer = await file.arrayBuffer();
-    let extracted: ReturnType<typeof extractPptText>;
-    try {
-      extracted = extractPptText(buffer);
-    } catch {
-      return NextResponse.json(
-        { error: 'Could not read that PowerPoint file (it may be password-protected or corrupt).' },
-        { status: 400 }
-      );
-    }
-    if (extracted.pages.every((p) => p.trim().length === 0)) {
-      return NextResponse.json({ error: 'no extractable text in this presentation' }, { status: 400 });
-    }
-    const fileKey = await storeSourceFile(new Uint8Array(buffer), name, 'application/vnd.ms-powerpoint');
-    const result = await ingestTextSource(db, {
-      notebookId,
-      userId: user.id,
-      title: name,
-      pages: extracted.pages,
-      kind: 'ppt',
-      fileKey
-    });
-    if (extracted.pageCount > 0) {
-      await db.execute({
-        sql: 'UPDATE sources SET meta = ? WHERE id = ?',
-        args: [`${extracted.pageCount} slides · ${result.chunks} chunks`, result.id]
-      });
-    }
-    return NextResponse.json(result, { status: 201 });
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const fileKey = await storeSourceFile(bytes, name, 'application/vnd.ms-powerpoint');
+    return ingestLegacyPpt(db, { notebookId, userId: user.id, bytes, name, fileKey });
   } catch (error) {
     if ((error as CodedError).code) {
       return NextResponse.json(

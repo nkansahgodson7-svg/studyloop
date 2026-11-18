@@ -11,8 +11,12 @@ export interface ExtractedPpt {
  * slide (possibly empty for image-only slides) so the ingest core can keep the
  * slide→page mapping, matching the PDF path.
  */
-export function extractPptText(data: ArrayBuffer | Buffer): ExtractedPpt {
-  const buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
+export function extractPptText(data: ArrayBuffer | Uint8Array | Buffer): ExtractedPpt {
+  const buffer = Buffer.isBuffer(data)
+    ? data
+    : data instanceof Uint8Array
+      ? Buffer.from(data)
+      : Buffer.from(new Uint8Array(data));
   const pres = (PPT as any).readBuffer(buffer);
   const arr: string[] = (PPT as any).utils.to_text(pres) ?? [];
   const pages = arr.map((s) => (typeof s === 'string' ? s.trim() : ''));

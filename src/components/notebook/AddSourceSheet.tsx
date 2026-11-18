@@ -4,14 +4,18 @@ import { useState, type ReactNode } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { Icon } from "@/components/ui/icons";
 import { addSourceErrorMessage, extractErrorMessage } from "@/lib/client/extract-error";
+import { describePhase, type Phase } from "@/lib/client/upload-progress";
 import { useUploadThing } from "@/lib/client/uploadthing";
 
 type Kind = "pdf" | "ppt" | "text" | "youtube";
 
-// Must match MAX_PPT_BYTES in src/lib/server/sources.ts. The legacy path sends
-// the whole file in one request, and the host rejects bodies over 4.5 MB with a
-// bare 413 after the upload completes, so refuse it before it is sent.
+// A legacy .ppt sent in one request hits the host's 4.5 MB body cap, so decks
+// above this go through storage instead. Must match MAX_PPT_BYTES in
+// src/lib/server/sources.ts.
 const LEGACY_PPT_MAX_BYTES = 4 * 1024 * 1024;
+
+// Must match MAX_RELAYED_FILE_BYTES in src/lib/server/source-files.ts.
+const LEGACY_PPT_RELAY_MAX_BYTES = 40 * 1024 * 1024;
 
 const KINDS: Array<{ kind: Kind; title: string; sub: string; glyph: string; tone: string }> = [
   { kind: "pdf", title: "PDF", sub: "Lecture slides, textbook chapters", glyph: "file", tone: "tone-butter" },
@@ -30,15 +34,21 @@ export default function AddSourceSheetContent({
   onSuccess: () => void;
 }) {
   const { close } = useSheet();
-  const { startUpload } = useUploadThing("sourceFile");
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const { startUpload } = useUploadThing("sourceFile", {
+    onUploadProgress: (percent) => setUploadPercent(percent)
+  });
   const [kind, setKind] = useState<Kind>("pdf");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<Phase | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
 
   async function submit(data: FormData) {
     if (busy) return;
     setError(null);
+    setPhase(null);
+    setUploadPercent(0);
 
     let init: RequestInit;
     let pptUpload = false;
@@ -59,7 +69,11 @@ export default function AddSourceSheetContent({
       setBusy(true);
       try {
         const { extractPdfText } = await import("@/lib/pdf/extract");
-        const { pages, pageCount } = await extractPdfText(await file.arrayBuffer());
+        setPhase({ kind: "reading", unit: "page", done: 0, total: 0 });
+        const { pages, pageCount } = await extractPdfText(await file.arrayBuffer(), (done, total) =>
+          setPhase({ kind: "reading", unit: "page", done, total })
+        );
+        setPhase({ kind: "indexing", unit: "pages", total: pageCount });
         init = {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -87,16 +101,21 @@ export default function AddSourceSheetContent({
             setError("PowerPoint file too large (max 40 MB).");
             return;
           }
-          const { pages, pageCount } = await extractPptxText(await file.arrayBuffer());
+          setPhase({ kind: "reading", unit: "slide", done: 0, total: 0 });
+          const { pages, pageCount } = await extractPptxText(await file.arrayBuffer(), (done, total) =>
+            setPhase({ kind: "reading", unit: "slide", done, total })
+          );
           // Keep the original deck for rendered slide previews. Without storage
           // configured the source still works from the extracted text.
           let fileKey: string | undefined;
+          setPhase({ kind: "uploading", label: "Uploading the original deck" });
           try {
             const uploaded = await startUpload([file]);
             fileKey = uploaded?.[0]?.key;
           } catch {
             fileKey = undefined;
           }
+          setPhase({ kind: "indexing", unit: "slides", total: pageCount });
           init = {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -108,18 +127,47 @@ export default function AddSourceSheetContent({
           return;
         }
       } else if (lower.endsWith('.ppt')) {
-        // Legacy binary format is parsed server-side (file upload).
-        if (file.size > LEGACY_PPT_MAX_BYTES) {
+        // Legacy binary format is parsed server-side, so the bytes have to
+        // reach the server. A direct request is capped by the host at 4.5 MB,
+        // so bigger decks are parked in storage and pulled back by custom id.
+        pptUpload = true;
+        if (file.size > LEGACY_PPT_RELAY_MAX_BYTES) {
           const mb = (file.size / (1024 * 1024)).toFixed(1);
           setError(
-            `This .ppt is ${mb} MB, and legacy .ppt files must be under 4 MB. Open it in PowerPoint, save it as .pptx, then upload that.`
+            `This .ppt is ${mb} MB, and the limit is 40 MB. Save it as .pptx from PowerPoint and upload that.`
           );
           return;
         }
-        const formData = new FormData();
-        formData.append('file', file);
-        init = { method: 'POST', body: formData };
-        pptUpload = true;
+        if (file.size > LEGACY_PPT_MAX_BYTES) {
+          setBusy(true);
+          setPhase({ kind: 'uploading', label: 'Uploading the deck' });
+          let customId: string | undefined;
+          try {
+            const uploaded = await startUpload([file]);
+            customId = uploaded?.[0]?.serverData?.customId ?? undefined;
+          } catch {
+            customId = undefined;
+          }
+          if (!customId) {
+            setBusy(false);
+            setPhase(null);
+            setError(
+              'This deck is too large to send directly, and upload storage is unavailable. Save it as .pptx and upload that.'
+            );
+            return;
+          }
+          setPhase({ kind: 'uploading', label: 'Reading and indexing the slides' });
+          init = {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ title: file.name, kind: 'ppt', customId })
+          };
+        } else {
+          const formData = new FormData();
+          formData.append('file', file);
+          init = { method: 'POST', body: formData };
+          setPhase({ kind: 'uploading', label: 'Uploading the deck' });
+        }
       } else {
         setError("Choose a .ppt or .pptx file.");
         return;
@@ -156,6 +204,8 @@ export default function AddSourceSheetContent({
       setError("Network error — try again");
     } finally {
       setBusy(false);
+      setPhase(null);
+      setUploadPercent(0);
     }
   }
 
@@ -163,13 +213,15 @@ export default function AddSourceSheetContent({
     <div className="processing">
       <div className="processing__row">
         <span className="spinner" />{" "}
-        {kind === "pdf"
-          ? "Extracting pages and indexing"
-          : kind === "ppt"
-            ? "Extracting slides and indexing"
-            : kind === "youtube"
-              ? "Fetching transcript"
-              : "Chunking and indexing"}
+        {phase
+          ? describePhase(phase, uploadPercent)
+          : kind === "pdf"
+            ? "Extracting pages and indexing"
+            : kind === "ppt"
+              ? "Extracting slides and indexing"
+              : kind === "youtube"
+                ? "Fetching transcript"
+                : "Chunking and indexing"}
       </div>
       <div className="processing__row">
         <Icon name="check" size={15} /> Chunks will be searchable from Chat
@@ -217,7 +269,7 @@ export default function AddSourceSheetContent({
             <span className="file-picker__main">
               <span className="file-picker__title">{fileName ?? "Choose a PowerPoint"}</span>
               <span className="file-picker__sub">
-                {fileName ? "Tap to replace" : "Up to 300 slides · 40 MB (.pptx) / 4 MB (.ppt)"}
+                {fileName ? "Tap to replace" : "Up to 300 slides · 40 MB"}
               </span>
             </span>
             <span className="file-picker__action">{fileName ? "Change" : "Browse"}</span>

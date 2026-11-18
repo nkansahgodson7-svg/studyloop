@@ -36,7 +36,10 @@ function xmlText(xml: string): string {
   return lines.join('\n');
 }
 
-export async function extractPptxText(data: ArrayBuffer): Promise<ExtractedPptx> {
+export async function extractPptxText(
+  data: ArrayBuffer,
+  onProgress?: (done: number, total: number) => void
+): Promise<ExtractedPptx> {
   let zip: Record<string, Uint8Array>;
   try {
     zip = unzip(data);
@@ -87,7 +90,7 @@ export async function extractPptxText(data: ArrayBuffer): Promise<ExtractedPptx>
   }
 
   const pageTexts: string[] = [];
-  for (const slideFile of slideFiles) {
+  for (const [index, slideFile] of slideFiles.entries()) {
     const slideXml = new TextDecoder().decode(zip[slideFile]);
     let slideText = xmlText(slideXml);
     const notesKey = notesBySlide[slideFile];
@@ -99,6 +102,7 @@ export async function extractPptxText(data: ArrayBuffer): Promise<ExtractedPptx>
       }
     }
     pageTexts.push(slideText.trim());
+    onProgress?.(index + 1, slideFiles.length);
   }
 
   const text = pageTexts.join('\f');

@@ -1,5 +1,8 @@
 import { UTApi } from 'uploadthing/server';
 
+/** Largest stored deck the relay will pull back for server-side parsing. */
+export const MAX_RELAYED_FILE_BYTES = 40 * 1024 * 1024;
+
 /**
  * Original uploads live in UploadThing (private ACL). Everything is optional:
  * without UPLOADTHING_TOKEN the app keeps working from extracted text and the
@@ -39,6 +42,37 @@ export async function deleteSourceFile(key: string): Promise<void> {
     await utapi().deleteFiles(key);
   } catch {
     // The source row is already gone; an orphaned object is not worth failing on.
+  }
+}
+
+export interface DownloadedSourceFile {
+  bytes: Uint8Array<ArrayBuffer>;
+  key: string;
+}
+
+/**
+ * Fetches an upload by the custom id assigned at upload time. UploadThing only
+ * signs the URL, it does not check who owns the file, so callers must verify
+ * the id belongs to the requesting user before calling this.
+ */
+export async function downloadSourceFileByCustomId(customId: string): Promise<DownloadedSourceFile | null> {
+  if (!sourceFilesEnabled()) return null;
+  try {
+    // Resolving the custom id also hands back the real file key, which is what
+    // the source row needs for previews later on.
+    const found = await utapi().getFileUrls([customId], { keyType: 'customId' });
+    const key = found?.data?.[0]?.key;
+    if (!key) return null;
+    const { ufsUrl } = await utapi().generateSignedURL(key);
+    const res = await fetch(ufsUrl);
+    if (!res.ok) return null;
+    const declared = Number(res.headers.get('content-length') ?? 0);
+    if (declared > MAX_RELAYED_FILE_BYTES) return null;
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_RELAYED_FILE_BYTES) return null;
+    return { bytes, key };
+  } catch {
+    return null;
   }
 }
 
