@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractErrorMessage } from './extract-error';
+import { addSourceErrorMessage, extractErrorMessage } from './extract-error';
 
 function coded(message: string, code: string): Error {
   return Object.assign(new Error(message), { code });
@@ -31,5 +31,24 @@ describe('extractErrorMessage', () => {
   it('falls back for values that are not errors', () => {
     expect(extractErrorMessage(null, 'ppt')).toBe('Could not read that PowerPoint file.');
     expect(extractErrorMessage('boom', 'pdf')).toBe('Could not read that PDF.');
+  });
+});
+
+describe('addSourceErrorMessage', () => {
+  it('shows the API message when the server explains itself', () => {
+    expect(addSourceErrorMessage(413, 'source text too large')).toBe('source text too large');
+    expect(addSourceErrorMessage(409, 'a notebook can hold at most 100 sources')).toBe(
+      'a notebook can hold at most 100 sources'
+    );
+  });
+
+  it('explains a bodyless 413 as an upload that is too large', () => {
+    expect(addSourceErrorMessage(413, null)).toContain('.ppt files must be under 4 MB');
+    expect(addSourceErrorMessage(413)).toContain('save the deck as .pptx');
+  });
+
+  it('keeps the status code for other failures', () => {
+    expect(addSourceErrorMessage(500, null)).toBe('Could not add source (500)');
+    expect(addSourceErrorMessage(502)).toBe('Could not add source (502)');
   });
 });

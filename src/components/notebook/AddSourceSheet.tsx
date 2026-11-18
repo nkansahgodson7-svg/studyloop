@@ -3,10 +3,15 @@
 import { useState, type ReactNode } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { Icon } from "@/components/ui/icons";
-import { extractErrorMessage } from "@/lib/client/extract-error";
+import { addSourceErrorMessage, extractErrorMessage } from "@/lib/client/extract-error";
 import { useUploadThing } from "@/lib/client/uploadthing";
 
 type Kind = "pdf" | "ppt" | "text" | "youtube";
+
+// Must match MAX_PPT_BYTES in src/lib/server/sources.ts. The legacy path sends
+// the whole file in one request, and the host rejects bodies over 4.5 MB with a
+// bare 413 after the upload completes, so refuse it before it is sent.
+const LEGACY_PPT_MAX_BYTES = 4 * 1024 * 1024;
 
 const KINDS: Array<{ kind: Kind; title: string; sub: string; glyph: string; tone: string }> = [
   { kind: "pdf", title: "PDF", sub: "Lecture slides, textbook chapters", glyph: "file", tone: "tone-butter" },
@@ -104,6 +109,13 @@ export default function AddSourceSheetContent({
         }
       } else if (lower.endsWith('.ppt')) {
         // Legacy binary format is parsed server-side (file upload).
+        if (file.size > LEGACY_PPT_MAX_BYTES) {
+          const mb = (file.size / (1024 * 1024)).toFixed(1);
+          setError(
+            `This .ppt is ${mb} MB, and legacy .ppt files must be under 4 MB. Open it in PowerPoint, save it as .pptx, then upload that.`
+          );
+          return;
+        }
         const formData = new FormData();
         formData.append('file', file);
         init = { method: 'POST', body: formData };
@@ -136,7 +148,7 @@ export default function AddSourceSheetContent({
       const res = await fetch(url, init);
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string } | null;
-        setError(body?.error ?? `Could not add source (${res.status})`);
+        setError(addSourceErrorMessage(res.status, body?.error));
         return;
       }
       onSuccess();

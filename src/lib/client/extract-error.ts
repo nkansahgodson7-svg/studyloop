@@ -17,3 +17,16 @@ export function extractErrorMessage(error: unknown, kind: ExtractKind): string {
   if (code === tooLarge && message.length > 0) return message;
   return GENERIC[kind];
 }
+
+/**
+ * Maps a failed add-source response to the message shown in the sheet. A 413
+ * with no JSON body comes from the hosting layer, not the app, when a request
+ * body is too large — say so instead of showing a bare status code.
+ */
+export function addSourceErrorMessage(status: number, apiError?: string | null): string {
+  if (apiError) return apiError;
+  if (status === 413) {
+    return 'That upload is too large for the server. Legacy .ppt files must be under 4 MB — save the deck as .pptx and try again.';
+  }
+  return `Could not add source (${status})`;
+}
