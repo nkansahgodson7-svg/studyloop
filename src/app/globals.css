@@ -2500,6 +2500,40 @@ picture {
   color: var(--brand);
 }
 
+.added {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-radius: var(--r-sm);
+  background: var(--brand-soft);
+  border: 1px solid var(--line);
+}
+
+.added__tile {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--brand);
+  color: var(--surface);
+}
+
+.added__title {
+  font-size: 13.5px;
+  font-weight: 550;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.added__sub {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+}
+
 /* Determinate progress for an upload or a page-by-page read; unmeasurable
    steps keep the spinner alone. */
 .processing__pct {

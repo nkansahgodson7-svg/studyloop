@@ -409,9 +409,9 @@ export default function NotebookScreen() {
 
   function openAddSource() {
     if (!bundle) return;
+    // The sheet confirms the result itself and stays open, so this only refreshes
+    // the notebook behind it.
     sheet.open(<AddSourceSheetContent notebookId={id} notebookTitle={bundle.title} onSuccess={() => {
-      sheet.close();
-      toast("Source added");
       void notebookViewsCache.load({ force: true }).catch(() => undefined);
       void reload(true);
     }} />);

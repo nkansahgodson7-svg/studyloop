@@ -43,6 +43,19 @@ export default function AddSourceSheetContent({
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [added, setAdded] = useState<string | null>(null);
+
+  function resetForAnother() {
+    for (const id of ["pdfFile", "pptFile"]) {
+      const input = document.querySelector<HTMLInputElement>(`#${id}`);
+      if (input) input.value = "";
+    }
+    setAdded(null);
+    setFileName(null);
+    setError(null);
+    setPhase(null);
+    setUploadPercent(0);
+  }
 
   async function submit(data: FormData) {
     if (busy) return;
@@ -52,6 +65,8 @@ export default function AddSourceSheetContent({
 
     let init: RequestInit;
     let pptUpload = false;
+    // Shown in the success state once the source is stored.
+    let addedTitle = "Pasted text";
     if (kind === "youtube") {
       const url = ((data.get("url") ?? "") as string).trim();
       init = {
@@ -59,6 +74,7 @@ export default function AddSourceSheetContent({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ url })
       };
+      addedTitle = "YouTube transcript";
     } else if (kind === "pdf") {
       const fileInput = document.querySelector<HTMLInputElement>("#pdfFile");
       const file = fileInput?.files?.[0];
@@ -66,6 +82,7 @@ export default function AddSourceSheetContent({
         setError("Choose a PDF first.");
         return;
       }
+      addedTitle = file.name;
       setBusy(true);
       try {
         const { extractPdfText } = await import("@/lib/pdf/extract");
@@ -91,6 +108,7 @@ export default function AddSourceSheetContent({
         setError("Choose a PowerPoint file first.");
         return;
       }
+      addedTitle = file.name;
       const lower = file.name.toLowerCase();
       if (lower.endsWith('.pptx')) {
         setBusy(true);
@@ -178,10 +196,12 @@ export default function AddSourceSheetContent({
         setError("Paste at least a paragraph (20+ characters).");
         return;
       }
+      const title = ((data.get("title") ?? "") as string).trim();
+      addedTitle = title || "Pasted text";
       init = {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: ((data.get("title") ?? "") as string).trim() || undefined, text })
+        body: JSON.stringify({ title: title || undefined, text })
       };
     }
 
@@ -199,6 +219,9 @@ export default function AddSourceSheetContent({
         setError(addSourceErrorMessage(res.status, body?.error));
         return;
       }
+      // Refresh the notebook behind the sheet, then keep the sheet open so the
+      // result is confirmed in place instead of vanishing in a toast.
+      setAdded(addedTitle);
       onSuccess();
     } catch {
       setError("Network error — try again");
@@ -330,13 +353,28 @@ export default function AddSourceSheetContent({
     )
   };
 
+  const success: ReactNode = added ? (
+    <div className="added" role="status">
+      <span className="added__tile">
+        <Icon name="check" size={20} />
+      </span>
+      <div>
+        <p className="added__title">{added}</p>
+        <p className="added__sub">Added to this notebook. Ask about it in Chat and generate cards from it.</p>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <SheetFrame
-      title="Add a source"
+      title={added ? "Source added" : "Add a source"}
       sub={notebookTitle}
-      formId="addSourceForm"
+      formId={added ? undefined : "addSourceForm"}
       onSubmit={(data) => void submit(data)}
       body={
+        added ? (
+          success
+        ) : (
         <>
           <div className="kind-list">
             {KINDS.map((meta) => (
@@ -376,8 +414,19 @@ export default function AddSourceSheetContent({
           ) : null}
           {processing}
         </>
+        )
       }
       foot={
+        added ? (
+          <>
+            <button className="btn btn--primary btn--block" type="button" onClick={close}>
+              Done
+            </button>
+            <button className="btn btn--ghost btn--sm btn--block" type="button" onClick={resetForAnother}>
+              Add another source
+            </button>
+          </>
+        ) : (
         <>
           <button
             className="btn btn--primary btn--block"
@@ -404,6 +453,7 @@ export default function AddSourceSheetContent({
             Cancel
           </button>
         </>
+        )
       }
     />
   );
