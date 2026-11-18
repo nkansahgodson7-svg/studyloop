@@ -1,6 +1,6 @@
 import { zipSync, strToU8 } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { extractPptxText } from './extract';
+import { extractPptxText, MAX_PPTX_SLIDES } from './extract';
 
 function buildPptx(slides: string[], notes: Record<number, string> = {}): ArrayBuffer {
   const files: Record<string, Uint8Array> = {};
@@ -36,5 +36,14 @@ describe('extractPptxText', () => {
     expect(out.pages[0]).toContain('Notes:\nSpeaker notes here');
     expect(out.pages[1]).toBe('');
     expect(out.pages[2]).toBe('Third slide');
+  });
+
+  it('reports the slide count when the deck is over the limit', async () => {
+    const count = MAX_PPTX_SLIDES + 1;
+    const buf = buildPptx(Array.from({ length: count }, (_, i) => `Slide ${i + 1}`));
+    await expect(extractPptxText(buf)).rejects.toMatchObject({
+      code: 'PPTX_TOO_LARGE',
+      message: `This deck has ${count} slides — the limit is ${MAX_PPTX_SLIDES}.`
+    });
   });
 });

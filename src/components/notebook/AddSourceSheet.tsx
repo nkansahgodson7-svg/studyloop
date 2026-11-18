@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { Icon } from "@/components/ui/icons";
+import { extractErrorMessage } from "@/lib/client/extract-error";
 import { useUploadThing } from "@/lib/client/uploadthing";
 
 type Kind = "pdf" | "ppt" | "text" | "youtube";
@@ -59,9 +60,9 @@ export default function AddSourceSheetContent({
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ title: file.name, pages, kind: "pdf", pageCount })
         };
-      } catch {
+      } catch (error) {
         setBusy(false);
-        setError("Could not read that PDF.");
+        setError(extractErrorMessage(error, "pdf"));
         return;
       }
     } else if (kind === "ppt") {
@@ -96,9 +97,9 @@ export default function AddSourceSheetContent({
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ title: file.name, pages, kind: "ppt", pageCount, fileKey })
           };
-        } catch {
+        } catch (error) {
           setBusy(false);
-          setError("Could not read that PowerPoint file.");
+          setError(extractErrorMessage(error, "ppt"));
           return;
         }
       } else if (lower.endsWith('.ppt')) {

@@ -10,7 +10,11 @@ export interface ExtractedPptx {
 }
 
 function unzip(data: ArrayBuffer): Record<string, Uint8Array> {
-  return unzipSync(new Uint8Array(data));
+  // Only inflate the slide and notes XML. Decks carry embedded images and
+  // video, and expanding those into memory can fail on a large presentation.
+  return unzipSync(new Uint8Array(data), {
+    filter: (file) => /^ppt\/(slides\/[^/]+\.xml|slides\/_rels\/[^/]+\.rels|notesSlides\/[^/]+\.xml)$/.test(file.name)
+  });
 }
 
 function xmlText(xml: string): string {
@@ -53,7 +57,7 @@ export async function extractPptxText(data: ArrayBuffer): Promise<ExtractedPptx>
     throw Object.assign(new Error('no slides found in presentation'), { code: 'BAD_PPTX' });
   }
   if (slideFiles.length > MAX_PPTX_SLIDES) {
-    throw Object.assign(new Error(`Presentation has ${slideFiles.length} slides — limit is ${MAX_PPTX_SLIDES}`), {
+    throw Object.assign(new Error(`This deck has ${slideFiles.length} slides — the limit is ${MAX_PPTX_SLIDES}.`), {
       code: 'PPTX_TOO_LARGE'
     });
   }

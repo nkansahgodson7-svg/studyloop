@@ -32,7 +32,7 @@ export async function extractPdfText(data: ArrayBuffer): Promise<ExtractedPdf> {
   }
   if (pdf.numPages > MAX_PDF_PAGES) {
     await task.destroy();
-    throw Object.assign(new Error(`PDF has ${pdf.numPages} pages — limit is ${MAX_PDF_PAGES}`), {
+    throw Object.assign(new Error(`This PDF has ${pdf.numPages} pages — the limit is ${MAX_PDF_PAGES}.`), {
       code: 'PDF_TOO_LARGE'
     });
   }
