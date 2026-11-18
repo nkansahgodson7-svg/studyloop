@@ -177,7 +177,7 @@ export default function AddSourceSheetContent({
             <span className="file-picker__main">
               <span className="file-picker__title">{fileName ?? "Choose a PDF"}</span>
               <span className="file-picker__sub">
-                {fileName ? "Tap to replace" : "Up to 100 pages · 40 MB"}
+                {fileName ? "Tap to replace" : "Up to 300 pages · 40 MB"}
               </span>
             </span>
             <span className="file-picker__action">{fileName ? "Change" : "Browse"}</span>
@@ -205,7 +205,7 @@ export default function AddSourceSheetContent({
             <span className="file-picker__main">
               <span className="file-picker__title">{fileName ?? "Choose a PowerPoint"}</span>
               <span className="file-picker__sub">
-                {fileName ? "Tap to replace" : "Up to 100 slides · 40 MB (.pptx) / 4 MB (.ppt)"}
+                {fileName ? "Tap to replace" : "Up to 300 slides · 40 MB (.pptx) / 4 MB (.ppt)"}
               </span>
             </span>
             <span className="file-picker__action">{fileName ? "Change" : "Browse"}</span>

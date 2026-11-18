@@ -1,6 +1,6 @@
 import { unzipSync } from 'fflate';
 
-export const MAX_PPTX_SLIDES = 100;
+export const MAX_PPTX_SLIDES = 300;
 export const MAX_PPTX_BYTES = 40 * 1024 * 1024;
 
 export interface ExtractedPptx {

@@ -1,6 +1,6 @@
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 
-export const MAX_PDF_PAGES = 100;
+export const MAX_PDF_PAGES = 300;
 export const MAX_PDF_BYTES = 40 * 1024 * 1024;
 
 let pdfjsPromise: Promise<typeof import('pdfjs-dist')> | null = null;
