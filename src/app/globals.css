@@ -2500,6 +2500,29 @@ picture {
   color: var(--brand);
 }
 
+/* Determinate progress for an upload or a page-by-page read; unmeasurable
+   steps keep the spinner alone. */
+.processing__pct {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.processing__meter {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.processing__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand);
+  transition: width 240ms var(--ease-out);
+}
+
 /* Generating a mock exam: the meter and counts mirror real server batches,
    the clock only proves the wait is moving. */
 .gen {

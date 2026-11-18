@@ -4,7 +4,7 @@ import { useState, type ReactNode } from "react";
 import { SheetFrame, useSheet } from "@/components/ui/Sheet";
 import { Icon } from "@/components/ui/icons";
 import { addSourceErrorMessage, extractErrorMessage } from "@/lib/client/extract-error";
-import { describePhase, type Phase } from "@/lib/client/upload-progress";
+import { describePhase, phaseProgress, type Phase } from "@/lib/client/upload-progress";
 import { useUploadThing } from "@/lib/client/uploadthing";
 
 type Kind = "pdf" | "ppt" | "text" | "youtube";
@@ -156,7 +156,7 @@ export default function AddSourceSheetContent({
             );
             return;
           }
-          setPhase({ kind: 'uploading', label: 'Reading and indexing the slides' });
+          setPhase({ kind: 'working', label: 'Reading and indexing the slides' });
           init = {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -209,20 +209,35 @@ export default function AddSourceSheetContent({
     }
   }
 
+  const progress = phaseProgress(phase, uploadPercent);
+  const progressLabel = phase
+    ? describePhase(phase)
+    : kind === "pdf"
+      ? "Extracting pages and indexing"
+      : kind === "ppt"
+        ? "Extracting slides and indexing"
+        : kind === "youtube"
+          ? "Fetching transcript"
+          : "Chunking and indexing";
+
   const processing: ReactNode = busy ? (
     <div className="processing">
       <div className="processing__row">
-        <span className="spinner" />{" "}
-        {phase
-          ? describePhase(phase, uploadPercent)
-          : kind === "pdf"
-            ? "Extracting pages and indexing"
-            : kind === "ppt"
-              ? "Extracting slides and indexing"
-              : kind === "youtube"
-                ? "Fetching transcript"
-                : "Chunking and indexing"}
+        <span className="spinner" /> {progressLabel}
+        {progress !== null ? <span className="processing__pct">{Math.round(progress * 100)}%</span> : null}
       </div>
+      {progress !== null ? (
+        <div
+          className="processing__meter"
+          role="progressbar"
+          aria-label={progressLabel}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
+          <span className="processing__fill" style={{ width: `${Math.round(progress * 100)}%` }} />
+        </div>
+      ) : null}
       <div className="processing__row">
         <Icon name="check" size={15} /> Chunks will be searchable from Chat
       </div>
