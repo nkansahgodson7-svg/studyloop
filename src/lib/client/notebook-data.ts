@@ -2,7 +2,7 @@ import { getJson } from "./api";
 
 export interface NotebookSource {
   id: number;
-  kind: "pdf" | "youtube" | "text";
+  kind: "pdf" | "ppt" | "youtube" | "text";
   title: string;
   url: string | null;
   meta: string;

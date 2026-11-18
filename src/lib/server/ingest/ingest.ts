@@ -5,7 +5,7 @@ import { ownNotebook } from '../notebooks';
 export interface SourceRow {
   id: number;
   notebookId: number;
-  kind: 'pdf' | 'youtube' | 'text';
+  kind: 'pdf' | 'youtube' | 'text' | 'ppt';
   title: string;
   url: string | null;
   meta: string;
@@ -28,11 +28,11 @@ export interface IngestResult {
   chunks: number;
 }
 
-export type IngestableKind = 'text' | 'pdf' | 'youtube';
+export type IngestableKind = 'text' | 'pdf' | 'youtube' | 'ppt';
 
 export const MAX_SOURCES_PER_NOTEBOOK = 100;
 
-export const SOURCE_KINDS: readonly IngestableKind[] = ['text', 'pdf', 'youtube'];
+export const SOURCE_KINDS: readonly IngestableKind[] = ['text', 'pdf', 'youtube', 'ppt'];
 
 const SOURCE_COLUMNS = 's.id, s.notebook_id, s.kind, s.title, s.url, s.meta, s.created_at';
 
@@ -40,7 +40,7 @@ function rowToSource(row: Record<string, InValue>): SourceRow {
   return {
     id: Number(row['id']),
     notebookId: Number(row['notebook_id']),
-    kind: row['kind'] === 'pdf' ? 'pdf' : row['kind'] === 'youtube' ? 'youtube' : 'text',
+    kind: row['kind'] === 'pdf' ? 'pdf' : row['kind'] === 'youtube' ? 'youtube' : row['kind'] === 'ppt' ? 'ppt' : 'text',
     title: String(row['title']),
     url: row['url'] == null ? null : String(row['url']),
     meta: String(row['meta']),
@@ -64,6 +64,7 @@ export async function ingestTextSource(
     url?: string;
     kind?: IngestableKind;
     meta?: string;
+    fileKey?: string | null;
   }
 ): Promise<IngestResult> {
   const kind: IngestableKind = input.kind ?? 'text';
@@ -99,8 +100,16 @@ export async function ingestTextSource(
     ? chunkPages(input.pages!)
     : chunkText(text).map((chunk) => ({ text: chunk, page: null }));
   const inserted = await db.execute({
-    sql: 'INSERT INTO sources (notebook_id, kind, title, url, text, meta) VALUES (?, ?, ?, ?, ?, ?)',
-    args: [input.notebookId, kind, title, input.url ?? null, text, input.meta || `${chunks.length} chunks`]
+    sql: 'INSERT INTO sources (notebook_id, kind, title, url, file_key, text, meta) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    args: [
+      input.notebookId,
+      kind,
+      title,
+      input.url ?? null,
+      input.fileKey ?? null,
+      text,
+      input.meta || `${chunks.length} chunks`
+    ]
   });
   const sourceId = Number(inserted.lastInsertRowid!);
 

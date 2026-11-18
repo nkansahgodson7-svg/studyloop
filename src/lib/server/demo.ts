@@ -4,7 +4,7 @@ import { ingestTextSource } from './ingest/ingest';
 import { createNotebook, deleteNotebook, listNotebooks } from './notebooks';
 
 interface SeedSource {
-  kind: 'pdf' | 'youtube' | 'text';
+  kind: 'pdf' | 'ppt' | 'youtube' | 'text';
   title: string;
   meta: string;
   text: string;

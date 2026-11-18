@@ -12,6 +12,7 @@ import AddSourceSheetContent from "@/components/notebook/AddSourceSheet";
 import ChatListPanel from "@/components/chat/ChatListPanel";
 import { NotebookMenuSheet } from "@/components/notebook/NotebookMenuSheet";
 import GenerateCardsSheetContent from "@/components/notebook/GenerateCardsSheet";
+import SourcePreviewSheetContent from "@/components/notebook/SourcePreviewSheet";
 import ExamListPanel from "@/components/quiz/ExamListPanel";
 import { dueCount, loadNotebook, type NotebookBundle, type NotebookCard } from "@/lib/client/notebook-data";
 import { scorePercent } from "@/lib/quiz";
@@ -30,15 +31,15 @@ type Tab = "overview" | "chat" | "cards" | "quiz";
 type LoadStatus = "loading" | "ready" | "missing" | "failed";
 
 function sourceTone(kind: string): string {
-  return kind === "pdf" ? "tone-butter" : kind === "youtube" ? "tone-sky" : "tone-sage";
+  return kind === "pdf" || kind === "ppt" ? "tone-butter" : kind === "youtube" ? "tone-sky" : "tone-sage";
 }
 
 function sourceGlyph(kind: string): string {
-  return kind === "pdf" ? "file" : kind === "youtube" ? "play" : "text";
+  return kind === "pdf" || kind === "ppt" ? "file" : kind === "youtube" ? "play" : "text";
 }
 
 function sourceLabel(kind: string): string {
-  return kind === "pdf" ? "PDF" : kind === "youtube" ? "YouTube" : "Note";
+  return kind === "pdf" ? "PDF" : kind === "ppt" ? "PowerPoint" : kind === "youtube" ? "YouTube" : "Note";
 }
 
 /**
@@ -92,6 +93,7 @@ function SourceRowView({
   onDelete: () => void;
 }) {
   const { toast } = useToast();
+  const { open } = useSheet();
   const [deleting, setDeleting] = useState(false);
 
   async function remove() {
@@ -115,23 +117,29 @@ function SourceRowView({
 
   return (
     <div className="row source-row">
-      <span className={`row__tile ${sourceTone(source.kind)}`}>
-        <Icon name={sourceGlyph(source.kind)} size={21} />
-      </span>
-      <span className="row__main">
-        <span className="row__title">{source.title}</span>
-        <span className="row__meta">
-          <span className="source-row__sub">
-            {sourceLabel(source.kind)}
-            {source.meta ? (
-              <>
-                <span className="dot" />
-                {source.meta}
-              </>
-            ) : null}
+      <button
+        className="source-row__open"
+        type="button"
+        onClick={() => open(<SourcePreviewSheetContent notebookId={notebookId} source={source} />)}
+      >
+        <span className={`row__tile ${sourceTone(source.kind)}`}>
+          <Icon name={sourceGlyph(source.kind)} size={21} />
+        </span>
+        <span className="row__main">
+          <span className="row__title">{source.title}</span>
+          <span className="row__meta">
+            <span className="source-row__sub">
+              {sourceLabel(source.kind)}
+              {source.meta ? (
+                <>
+                  <span className="dot" />
+                  {source.meta}
+                </>
+              ) : null}
+            </span>
           </span>
         </span>
-      </span>
+      </button>
       <button
         className="icon-btn icon-btn--outline"
         type="button"

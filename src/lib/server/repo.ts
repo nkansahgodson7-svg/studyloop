@@ -343,12 +343,26 @@ export async function setUserDisabled(db: Client, userId: number, disabled: bool
   }
 }
 
-export async function deleteSource(db: Client, sourceId: number, userId: number): Promise<boolean> {
+export async function deleteSource(
+  db: Client,
+  sourceId: number,
+  userId: number
+): Promise<{ deleted: boolean; fileKey: string | null }> {
+  const owned = await db.execute({
+    sql: `SELECT s.file_key FROM sources s
+            JOIN notebooks n ON n.id = s.notebook_id
+           WHERE s.id = ? AND n.user_id = ?`,
+    args: [sourceId, userId]
+  });
+  const row = owned.rows[0];
   const res = await db.execute({
     sql: 'DELETE FROM sources WHERE id = ? AND notebook_id IN (SELECT id FROM notebooks WHERE user_id = ?)',
     args: [sourceId, userId]
   });
-  return (res.rowsAffected ?? 0) > 0;
+  return {
+    deleted: (res.rowsAffected ?? 0) > 0,
+    fileKey: row?.['file_key'] == null ? null : String(row['file_key'])
+  };
 }
 
 export function isUniqueViolation(error: unknown): boolean {

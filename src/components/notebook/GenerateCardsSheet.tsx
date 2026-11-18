@@ -292,7 +292,7 @@ export default function GenerateCardsSheetContent({
                     {source.title}
                   </label>
                   <span className="tiny muted">
-                    {source.kind === "pdf" ? "PDF" : source.kind === "youtube" ? "YouTube" : "Note"}
+                    {source.kind === "pdf" ? "PDF" : source.kind === "ppt" ? "PowerPoint" : source.kind === "youtube" ? "YouTube" : "Note"}
                     {paged ? ` · ${source.pageCount} pages` : source.meta ? ` · ${source.meta}` : ""}
                   </span>
                   {isSelected && paged ? (

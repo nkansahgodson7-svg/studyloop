@@ -4,6 +4,8 @@ import { errorResponse, requireUser } from './auth';
 import { ownNotebook } from './notebooks';
 import { ingestTextSource, listSources, SOURCE_KINDS, type IngestableKind } from './ingest/ingest';
 import { detectChapters } from './ingest/pages';
+import { extractPptText } from './ingest/ppt';
+import { signedSourceFileUrl, storeSourceFile } from './source-files';
 import { INGEST_LIMIT, rateLimitResponse } from './ratelimit';
 
 const MAX_SOURCE_TEXT = 2_000_000;
@@ -48,7 +50,15 @@ export async function textSourceCreate(db: Client, req: Request, idRaw: string):
       pages?: unknown;
       kind?: unknown;
       pageCount?: unknown;
+      fileKey?: unknown;
     };
+    let fileKey: string | null = null;
+    if (body.fileKey != null) {
+      if (typeof body.fileKey !== 'string' || body.fileKey.length === 0 || body.fileKey.length > 512) {
+        return NextResponse.json({ error: 'invalid file key' }, { status: 400 });
+      }
+      fileKey = body.fileKey;
+    }
     let pages: string[] | undefined;
     let text: string;
     if (body.pages !== undefined) {
@@ -77,11 +87,89 @@ export async function textSourceCreate(db: Client, req: Request, idRaw: string):
           ? pages.length
           : null;
 
-    const result = await ingestTextSource(db, { notebookId, userId: user.id, title, text, pages, kind });
-    if (kind === 'pdf' && pageCount) {
+    const result = await ingestTextSource(db, {
+      notebookId,
+      userId: user.id,
+      title,
+      text,
+      pages,
+      kind,
+      // Only PowerPoint sources keep the original file for rendering.
+      fileKey: kind === 'ppt' ? fileKey : null
+    });
+    if ((kind === 'pdf' || kind === 'ppt') && pageCount) {
+      const unit = kind === 'ppt' ? 'slides' : 'pages';
       await db.execute({
         sql: 'UPDATE sources SET meta = ? WHERE id = ?',
-        args: [`${pageCount} pages · ${result.chunks} chunks`, result.id]
+        args: [`${pageCount} ${unit} · ${result.chunks} chunks`, result.id]
+      });
+    }
+    return NextResponse.json(result, { status: 201 });
+  } catch (error) {
+    if ((error as CodedError).code) {
+      return NextResponse.json(
+        { error: (error as Error).message },
+        { status: statusForCode((error as CodedError).code!) }
+      );
+    }
+    return errorResponse(error);
+  }
+}
+
+const MAX_PPT_BYTES = 4 * 1024 * 1024;
+
+export async function pptSourceCreate(db: Client, req: Request, idRaw: string): Promise<NextResponse> {
+  try {
+    const user = await requireUser(db, req);
+    const notebookId = Number(idRaw);
+    if (!Number.isInteger(notebookId)) {
+      return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+    const notebook = await ownNotebook(db, user.id, notebookId);
+    if (!notebook) {
+      return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+    const limited = await rateLimitResponse(db, `ingest:${user.id}`, INGEST_LIMIT);
+    if (limited) return limited;
+
+    const form = await req.formData();
+    const file = form.get('file');
+    if (!(file instanceof File)) {
+      return NextResponse.json({ error: 'file required' }, { status: 400 });
+    }
+    const name = file.name || 'presentation.ppt';
+    if (!name.toLowerCase().endsWith('.ppt')) {
+      return NextResponse.json({ error: 'only .ppt files are accepted here' }, { status: 400 });
+    }
+    if (file.size > MAX_PPT_BYTES) {
+      return NextResponse.json({ error: 'PowerPoint file too large (max 4 MB)' }, { status: 413 });
+    }
+    const buffer = await file.arrayBuffer();
+    let extracted: ReturnType<typeof extractPptText>;
+    try {
+      extracted = extractPptText(buffer);
+    } catch {
+      return NextResponse.json(
+        { error: 'Could not read that PowerPoint file (it may be password-protected or corrupt).' },
+        { status: 400 }
+      );
+    }
+    if (extracted.pages.every((p) => p.trim().length === 0)) {
+      return NextResponse.json({ error: 'no extractable text in this presentation' }, { status: 400 });
+    }
+    const fileKey = await storeSourceFile(new Uint8Array(buffer), name, 'application/vnd.ms-powerpoint');
+    const result = await ingestTextSource(db, {
+      notebookId,
+      userId: user.id,
+      title: name,
+      pages: extracted.pages,
+      kind: 'ppt',
+      fileKey
+    });
+    if (extracted.pageCount > 0) {
+      await db.execute({
+        sql: 'UPDATE sources SET meta = ? WHERE id = ?',
+        args: [`${extracted.pageCount} slides · ${result.chunks} chunks`, result.id]
       });
     }
     return NextResponse.json(result, { status: 201 });
@@ -108,6 +196,52 @@ export async function sourcesList(db: Client, req: Request, idRaw: string): Prom
       return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
     }
     return NextResponse.json(await listSources(db, notebookId));
+  } catch (error) {
+    return errorResponse(error);
+  }
+}
+
+/**
+ * Source detail for the in-app preview. Pages are split on form feeds, so a
+ * PowerPoint source returns one entry per slide (empty slides included).
+ */
+export async function sourceGet(
+  db: Client,
+  req: Request,
+  idRaw: string,
+  sourceIdRaw: string
+): Promise<NextResponse> {
+  try {
+    const user = await requireUser(db, req);
+    const notebookId = Number(idRaw);
+    const sourceId = Number(sourceIdRaw);
+    if (!Number.isInteger(notebookId) || !Number.isInteger(sourceId)) {
+      return NextResponse.json({ error: 'unknown source' }, { status: 404 });
+    }
+    const notebook = await ownNotebook(db, user.id, notebookId);
+    if (!notebook) {
+      return NextResponse.json({ error: 'unknown notebook' }, { status: 404 });
+    }
+    const result = await db.execute({
+      sql: `SELECT s.id, s.kind, s.title, s.url, s.meta, s.file_key, s.text, s.created_at
+              FROM sources s
+             WHERE s.id = ? AND s.notebook_id = ?`,
+      args: [sourceId, notebookId]
+    });
+    const row = result.rows[0];
+    if (!row) {
+      return NextResponse.json({ error: 'unknown source' }, { status: 404 });
+    }
+    return NextResponse.json({
+      id: Number(row['id']),
+      kind: String(row['kind']),
+      title: String(row['title']),
+      url: row['url'] == null ? null : String(row['url']),
+      meta: String(row['meta']),
+      fileUrl: row['file_key'] == null ? null : await signedSourceFileUrl(String(row['file_key'])),
+      pages: String(row['text'] ?? '').split('\f'),
+      createdAt: String(row['created_at'])
+    });
   } catch (error) {
     return errorResponse(error);
   }

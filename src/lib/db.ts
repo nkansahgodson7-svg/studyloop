@@ -83,9 +83,10 @@ CREATE TABLE IF NOT EXISTS notebooks (
 CREATE TABLE IF NOT EXISTS sources (
   id INTEGER PRIMARY KEY,
   notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('pdf', 'youtube', 'text')),
+  kind TEXT NOT NULL CHECK (kind IN ('pdf', 'youtube', 'text', 'ppt')),
   title TEXT NOT NULL,
   url TEXT,
+  file_key TEXT,
   text TEXT NOT NULL,
   meta TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -300,9 +301,51 @@ async function rebuildChatTablesOnce(db: Client): Promise<void> {
   });
 }
 
+async function migrateSourceKindPpt(db: Client): Promise<void> {
+  const marker = await db.execute({
+    sql: 'SELECT value FROM schema_meta WHERE key = ?',
+    args: ['source_kind_ppt_v1']
+  });
+  if (marker.rows.length > 0) return;
+  // Rebuild sources to widen the kind CHECK constraint (SQLite cannot ALTER CHECK).
+  await db.execute('PRAGMA foreign_keys = OFF');
+  try {
+    await db.executeMultiple(`
+      DROP TABLE IF EXISTS sources_new;
+      CREATE TABLE sources_new (
+        id INTEGER PRIMARY KEY,
+        notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('pdf', 'youtube', 'text', 'ppt')),
+        title TEXT NOT NULL,
+        url TEXT,
+        text TEXT NOT NULL,
+        meta TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      INSERT INTO sources_new (id, notebook_id, kind, title, url, text, meta, created_at)
+        SELECT id, notebook_id, kind, title, url, text, meta, created_at FROM sources;
+      DROP TABLE sources;
+      ALTER TABLE sources_new RENAME TO sources;
+      CREATE INDEX IF NOT EXISTS idx_sources_notebook ON sources(notebook_id);
+    `);
+  } finally {
+    await db.execute('PRAGMA foreign_keys = ON');
+  }
+  await db.execute({
+    sql: 'INSERT INTO schema_meta (key, value) VALUES (?, ?)',
+    args: ['source_kind_ppt_v1', new Date().toISOString()]
+  });
+}
+
 export async function applySchema(db: Client): Promise<void> {
   await db.executeMultiple(SCHEMA);
   await rebuildChatTablesOnce(db);
+  await migrateSourceKindPpt(db);
+  try {
+    await db.execute('ALTER TABLE sources ADD COLUMN file_key TEXT');
+  } catch {
+    // column already exists
+  }
   // Created after the rebuild: on legacy databases the old chat_messages table
   // has no conversation_id column, so this index cannot be part of SCHEMA.
   await db.execute(
