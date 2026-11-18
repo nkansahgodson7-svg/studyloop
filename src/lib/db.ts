@@ -301,45 +301,142 @@ async function rebuildChatTablesOnce(db: Client): Promise<void> {
   });
 }
 
+const PPT_SOURCE_MIGRATION_KEY = 'source_kind_ppt_v1';
+
+/** True while `sources` still has the pre-PowerPoint CHECK or lacks file_key. */
+async function sourcesNeedsPptMigration(db: Client): Promise<boolean> {
+  const table = await db.execute(
+    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sources'"
+  );
+  const sql = table.rows[0]?.['sql'];
+  if (typeof sql !== 'string') return false;
+  return !sql.includes("'ppt'") || !sql.includes('file_key');
+}
+
+/**
+ * Widen the sources.kind CHECK constraint to accept `ppt` (SQLite cannot ALTER a
+ * CHECK) and add sources.file_key.
+ *
+ * Foreign keys must stay enabled. Turso's HTTP client is stateless: every
+ * statement can land on a new logical connection, so a preceding
+ * `PRAGMA foreign_keys = OFF` does not reach this rebuild (and the pragma is a
+ * no-op inside a transaction anyway). Dropping `sources` with enforcement on
+ * makes SQLite cascade into source_chunks, where the FTS triggers fail with
+ * SQLITE_LOCKED, and silently nulls cards/quiz_exam_items.source_id.
+ *
+ * Instead the children are snapshotted, detached, restored with their original
+ * ids after the parent swap, and everything runs in one transaction. This works
+ * whether or not the server lets us turn foreign key checks off.
+ */
 async function migrateSourceKindPpt(db: Client): Promise<void> {
   const marker = await db.execute({
     sql: 'SELECT value FROM schema_meta WHERE key = ?',
-    args: ['source_kind_ppt_v1']
+    args: [PPT_SOURCE_MIGRATION_KEY]
   });
   if (marker.rows.length > 0) return;
-  // Rebuild sources to widen the kind CHECK constraint (SQLite cannot ALTER CHECK).
-  await db.execute('PRAGMA foreign_keys = OFF');
-  try {
+
+  if (await sourcesNeedsPptMigration(db)) {
+    const columns = await db.execute('PRAGMA table_info(sources)');
+    const fileKey = columns.rows.some((row) => String(row['name']) === 'file_key')
+      ? 'file_key'
+      : 'NULL';
     await db.executeMultiple(`
+      BEGIN;
+
+      -- Leftovers from an interrupted run, plus the snapshot tables.
       DROP TABLE IF EXISTS sources_new;
-      CREATE TABLE sources_new (
+      DROP TABLE IF EXISTS _ppt_sources_new;
+      DROP TABLE IF EXISTS _ppt_chunks_backup;
+      DROP TABLE IF EXISTS _ppt_cards_backup;
+      DROP TABLE IF EXISTS _ppt_exam_items_backup;
+
+      CREATE TABLE _ppt_chunks_backup (
+        id INTEGER PRIMARY KEY,
+        source_id INTEGER NOT NULL,
+        ord INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        page INTEGER
+      );
+      INSERT INTO _ppt_chunks_backup (id, source_id, ord, text, page)
+        SELECT id, source_id, ord, text, page FROM source_chunks;
+
+      CREATE TABLE _ppt_cards_backup (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL);
+      INSERT INTO _ppt_cards_backup (id, source_id)
+        SELECT id, source_id FROM cards WHERE source_id IS NOT NULL;
+
+      CREATE TABLE _ppt_exam_items_backup (id INTEGER PRIMARY KEY, source_id INTEGER NOT NULL);
+      INSERT INTO _ppt_exam_items_backup (id, source_id)
+        SELECT id, source_id FROM quiz_exam_items WHERE source_id IS NOT NULL;
+
+      -- Detach the children so the parent can be dropped without cascade
+      -- actions. The FTS triggers are dropped because deleting the chunks would
+      -- otherwise write to the FTS index while DROP TABLE is in flight.
+      DROP TRIGGER IF EXISTS source_chunks_ai;
+      DROP TRIGGER IF EXISTS source_chunks_ad;
+      DELETE FROM source_chunks;
+      UPDATE cards SET source_id = NULL WHERE source_id IS NOT NULL;
+      UPDATE quiz_exam_items SET source_id = NULL WHERE source_id IS NOT NULL;
+
+      CREATE TABLE _ppt_sources_new (
         id INTEGER PRIMARY KEY,
         notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
         kind TEXT NOT NULL CHECK (kind IN ('pdf', 'youtube', 'text', 'ppt')),
         title TEXT NOT NULL,
         url TEXT,
+        file_key TEXT,
         text TEXT NOT NULL,
         meta TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
       );
-      INSERT INTO sources_new (id, notebook_id, kind, title, url, text, meta, created_at)
-        SELECT id, notebook_id, kind, title, url, text, meta, created_at FROM sources;
+      INSERT INTO _ppt_sources_new (id, notebook_id, kind, title, url, file_key, text, meta, created_at)
+        SELECT id, notebook_id, kind, title, url, ${fileKey}, text, meta, created_at FROM sources;
+
       DROP TABLE sources;
-      ALTER TABLE sources_new RENAME TO sources;
+      ALTER TABLE _ppt_sources_new RENAME TO sources;
       CREATE INDEX IF NOT EXISTS idx_sources_notebook ON sources(notebook_id);
+
+      -- Same ids and text as before: the FTS index stays consistent.
+      INSERT INTO source_chunks (id, source_id, ord, text, page)
+        SELECT id, source_id, ord, text, page FROM _ppt_chunks_backup;
+
+      UPDATE cards SET source_id = (SELECT b.source_id FROM _ppt_cards_backup b WHERE b.id = cards.id)
+        WHERE id IN (SELECT id FROM _ppt_cards_backup);
+      UPDATE quiz_exam_items
+        SET source_id = (SELECT b.source_id FROM _ppt_exam_items_backup b WHERE b.id = quiz_exam_items.id)
+        WHERE id IN (SELECT id FROM _ppt_exam_items_backup);
+
+      DROP TABLE _ppt_chunks_backup;
+      DROP TABLE _ppt_cards_backup;
+      DROP TABLE _ppt_exam_items_backup;
+
+      CREATE TRIGGER source_chunks_ai AFTER INSERT ON source_chunks BEGIN
+        INSERT INTO source_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+      CREATE TRIGGER source_chunks_ad AFTER DELETE ON source_chunks BEGIN
+        INSERT INTO source_chunks_fts(source_chunks_fts, rowid, text)
+        VALUES ('delete', old.id, old.text);
+      END;
+
+      COMMIT;
     `);
-  } finally {
-    await db.execute('PRAGMA foreign_keys = ON');
   }
+
   await db.execute({
     sql: 'INSERT INTO schema_meta (key, value) VALUES (?, ?)',
-    args: ['source_kind_ppt_v1', new Date().toISOString()]
+    args: [PPT_SOURCE_MIGRATION_KEY, new Date().toISOString()]
   });
 }
 
 export async function applySchema(db: Client): Promise<void> {
   await db.executeMultiple(SCHEMA);
   await rebuildChatTablesOnce(db);
+  // The sources rebuild below snapshots source_chunks, including this column.
+  // Added before the rebuild: pre-existing databases may not have it yet.
+  try {
+    await db.execute('ALTER TABLE source_chunks ADD COLUMN page INTEGER');
+  } catch {
+    // column already exists
+  }
   await migrateSourceKindPpt(db);
   try {
     await db.execute('ALTER TABLE sources ADD COLUMN file_key TEXT');
@@ -364,11 +461,6 @@ export async function applySchema(db: Client): Promise<void> {
   }
   try {
     await db.execute('ALTER TABLE cards ADD COLUMN batch_id INTEGER REFERENCES card_batches(id) ON DELETE SET NULL');
-  } catch {
-    // column already exists
-  }
-  try {
-    await db.execute('ALTER TABLE source_chunks ADD COLUMN page INTEGER');
   } catch {
     // column already exists
   }

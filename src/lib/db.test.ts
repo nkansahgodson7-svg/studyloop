@@ -176,6 +176,132 @@ describe('db: schema + FTS', () => {
     await db.close();
   });
 
+  it('widens sources.kind for PowerPoint without touching chunks or source refs', async () => {
+    const db = makeLocalDb(join(dir, 'legacy-ppt.db'));
+    // Pre-PowerPoint database: old kind CHECK, no file_key, and a leftover
+    // sources_new table from a failed rebuild attempt.
+    await db.executeMultiple(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        pw_hash TEXT NOT NULL
+      );
+      CREATE TABLE notebooks (
+        id INTEGER PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title TEXT NOT NULL
+      );
+      CREATE TABLE sources (
+        id INTEGER PRIMARY KEY,
+        notebook_id INTEGER NOT NULL REFERENCES notebooks(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (kind IN ('pdf', 'youtube', 'text')),
+        title TEXT NOT NULL,
+        url TEXT,
+        text TEXT NOT NULL,
+        meta TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+      );
+      CREATE TABLE source_chunks (
+        id INTEGER PRIMARY KEY,
+        source_id INTEGER NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+        ord INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        page INTEGER
+      );
+      CREATE VIRTUAL TABLE source_chunks_fts USING fts5(
+        text,
+        content='source_chunks',
+        content_rowid='id'
+      );
+      CREATE TRIGGER source_chunks_ai AFTER INSERT ON source_chunks BEGIN
+        INSERT INTO source_chunks_fts(rowid, text) VALUES (new.id, new.text);
+      END;
+      CREATE TRIGGER source_chunks_ad AFTER DELETE ON source_chunks BEGIN
+        INSERT INTO source_chunks_fts(source_chunks_fts, rowid, text)
+        VALUES ('delete', old.id, old.text);
+      END;
+      CREATE TABLE cards (
+        id INTEGER PRIMARY KEY,
+        notebook_id INTEGER NOT NULL,
+        source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL,
+        front TEXT NOT NULL,
+        back TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE quiz_exams (
+        id INTEGER PRIMARY KEY,
+        notebook_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE TABLE quiz_exam_items (
+        id INTEGER PRIMARY KEY,
+        exam_id INTEGER NOT NULL REFERENCES quiz_exams(id) ON DELETE CASCADE,
+        ord INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        correct TEXT NOT NULL,
+        source_id INTEGER REFERENCES sources(id) ON DELETE SET NULL
+      );
+      CREATE TABLE sources_new (id INTEGER PRIMARY KEY);
+      INSERT INTO sources_new (id) VALUES (1);
+
+      INSERT INTO users (id, email, pw_hash) VALUES (1, 'ppt@test.local', 'h');
+      INSERT INTO notebooks (id, user_id, title) VALUES (1, 1, 'Bio');
+      INSERT INTO sources (id, notebook_id, kind, title, text) VALUES
+        (1, 1, 'pdf', 'Slides', 'cell body'),
+        (2, 1, 'text', 'Notes', 'mitochondria');
+      INSERT INTO source_chunks (id, source_id, ord, text, page) VALUES
+        (1, 1, 0, 'Active recall strengthens memory.', 1),
+        (2, 1, 1, 'Spaced repetition schedules reviews.', 2);
+      INSERT INTO cards (id, notebook_id, source_id, front, back, created_at)
+        VALUES (1, 1, 1, 'Q', 'A', '2026-01-01T00:00:00.000Z');
+      INSERT INTO quiz_exams (id, notebook_id, title, created_at)
+        VALUES (1, 1, 'Exam', '2026-01-01T00:00:00.000Z');
+      INSERT INTO quiz_exam_items (id, exam_id, ord, kind, prompt, correct, source_id)
+        VALUES (1, 1, 0, 'short', 'Why?', 'Because', 2);
+    `);
+
+    await applySchema(db);
+
+    const schema = await db.execute("SELECT sql FROM sqlite_master WHERE name = 'sources'");
+    expect(String(schema.rows[0]!['sql'])).toContain("'ppt'");
+    const columns = await db.execute('PRAGMA table_info(sources)');
+    expect(columns.rows.map((row) => row.name)).toContain('file_key');
+
+    const chunks = await db.execute('SELECT id, page FROM source_chunks ORDER BY id');
+    expect(chunks.rows).toEqual([
+      expect.objectContaining({ id: 1, page: 1 }),
+      expect.objectContaining({ id: 2, page: 2 })
+    ]);
+
+    const hit = await db.execute(
+      "SELECT rowid FROM source_chunks_fts WHERE source_chunks_fts MATCH 'recall'"
+    );
+    expect(hit.rows.map((row) => row['rowid'])).toEqual([1]);
+
+    const card = await db.execute('SELECT source_id FROM cards WHERE id = 1');
+    expect(card.rows[0]!['source_id']).toBe(1);
+    const examItem = await db.execute('SELECT source_id FROM quiz_exam_items WHERE id = 1');
+    expect(examItem.rows[0]!['source_id']).toBe(2);
+
+    const leftovers = await db.execute(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND (name LIKE '_ppt%' OR name = 'sources_new')"
+    );
+    expect(leftovers.rows).toHaveLength(0);
+    const fkErrors = await db.execute('PRAGMA foreign_key_check');
+    expect(fkErrors.rows).toHaveLength(0);
+
+    await db.execute({
+      sql: "INSERT INTO sources (notebook_id, kind, title, text) VALUES (1, 'ppt', 'Deck', 'slide text')"
+    });
+
+    await applySchema(db); // the marker prevents a second rebuild
+    const kept = await db.execute('SELECT COUNT(*) AS n FROM source_chunks');
+    expect(Number(kept.rows[0]!['n'])).toBe(2);
+    await db.close();
+  });
+
   it('deleting a notebook cascades chunks and keeps FTS in sync', async () => {
     const { db, source } = await seedNotebookWithChunk('cascade');
     await db.execute({
