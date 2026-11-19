@@ -7,7 +7,14 @@ const f = createUploadthing();
 
 export const ourFileRouter = {
   /** Original presentation files, uploaded directly from the browser. */
-  sourceFile: f({ blob: { maxFileSize: '64MB', maxFileCount: 1 } })
+  sourceFile: f(
+    { blob: { maxFileSize: '64MB', maxFileCount: 1 } },
+    // The browser gets the user-scoped customId with the presigned URLs, so it
+    // does not need to wait for this callback. That keeps uploads working when
+    // the deployment cannot receive UploadThing's callback (for example a
+    // Vercel preview protected by Vercel Authentication).
+    { awaitServerData: false }
+  )
     .middleware(async ({ req }) => {
       const user = await requireUser(getDb(), req);
       // UploadThing signs any key on request, so ownership has to come from the
@@ -16,7 +23,7 @@ export const ourFileRouter = {
       // the UTFiles symbol; returning `customId` as plain metadata is ignored.
       return { userId: user.id, [UTFiles]: [{ customId: `${user.id}-${crypto.randomUUID()}` }] };
     })
-    .onUploadComplete(async ({ metadata, file }) => {
+    .onUploadComplete(async ({ file }) => {
       // The dashboard can default to public; make privacy explicit when the
       // plan supports it. Private ACL is paid-only on UploadThing, so a
       // rejection here must not fail the upload on the free plan.
@@ -25,7 +32,6 @@ export const ourFileRouter = {
       } catch {
         // Free plan: keep the app's default ACL (public-read).
       }
-      return { userId: metadata.userId, key: file.key, customId: file.customId };
     })
 } satisfies FileRouter;
 

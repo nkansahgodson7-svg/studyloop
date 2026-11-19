@@ -162,7 +162,9 @@ export default function AddSourceSheetContent({
           let customId: string | undefined;
           try {
             const uploaded = await startUpload([file]);
-            customId = uploaded?.[0]?.serverData?.customId ?? undefined;
+            // The client gets the customId with the presigned URLs, so this
+            // does not depend on the onUploadComplete callback.
+            customId = uploaded?.[0]?.customId ?? undefined;
           } catch {
             customId = undefined;
           }
