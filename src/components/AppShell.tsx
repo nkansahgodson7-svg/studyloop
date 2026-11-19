@@ -1,10 +1,20 @@
 "use client";
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import { usePathname } from "next/navigation";
 import { directionFor, rootPath, titleFor, type NavDirection } from "@/lib/navigation";
 import { rememberRoute } from "@/lib/client/history";
-import { useOptimisticNavigation } from "@/lib/client/optimistic-nav";
+import { takePendingSnapshot, useOptimisticNavigation } from "@/lib/client/optimistic-nav";
 import { TabBar } from "@/components/ui/TabBar";
 import { NavProgress } from "@/components/ui/NavProgress";
 import { RouteSkeleton } from "@/components/ui/RouteSkeleton";
@@ -18,13 +28,23 @@ interface ExitState {
   scrollTop: number;
 }
 
-const NavDirectionContext = createContext<NavDirection>("none");
+interface NavEntry {
+  dir: NavDirection;
+  path: string;
+  claimed: boolean;
+}
 
-export function useNavDirection(): NavDirection {
-  return useContext(NavDirectionContext);
+const NavEntryContext = createContext<(pathname: string) => NavDirection>(() => "none");
+
+/** Returns the direction of the navigation that led to `pathname`, once. */
+export function useNavEntry(): (pathname: string) => NavDirection {
+  return useContext(NavEntryContext);
 }
 
 const EXIT_DURATION: Record<NavDirection, number> = { push: 340, pop: 300, fade: 220, none: 0 };
+
+/** How long an unclaimed entry direction stays valid for a late-mounting screen. */
+const ENTRY_TTL_MS = 1500;
 
 /**
  * How long a navigation may take before the shell takes over with a
@@ -40,34 +60,62 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { pending, pendingTarget } = useOptimisticNavigation();
   const viewRef = useRef<HTMLDivElement | null>(null);
   const [exit, setExit] = useState<ExitState | null>(null);
-  const [direction, setDirection] = useState<NavDirection>("none");
   const [ghostPath, setGhostPath] = useState<string | null>(null);
+  const entryRef = useRef<NavEntry>({ dir: "none", path: "", claimed: true });
+  // Filled during render, applied in a layout effect: a state update made while
+  // the router is rendering the new route can be discarded with that render.
+  const pendingExitRef = useRef<ExitState | null>(null);
 
-  let capturedExit: ExitState | null = null;
-  let capturedDir: NavDirection = "none";
+  // Hand the direction to whichever screen mounts at the destination. Screens
+  // claim it once, so a screen that mounts later (loading -> loaded) does not
+  // replay the animation.
+  const claimEntry = useCallback((path: string): NavDirection => {
+    const entry = entryRef.current;
+    if (entry.claimed || entry.path !== path) return "none";
+    entry.claimed = true;
+    return entry.dir;
+  }, []);
+  const entryContext = useMemo(() => claimEntry, [claimEntry]);
+
+  // Detect a route change exactly once. This branch must not run on the
+  // follow-up render caused by the state updates below: `prevPath` is advanced
+  // here, so a second pass would compare the new path to itself and report
+  // "none".
   const prev = prevPath.current;
   prevPath.current = pathname;
   if (prev !== null && prev !== pathname) {
-    capturedDir = directionFor(prev, pathname);
+    const capturedDir = directionFor(prev, pathname);
     if (capturedDir !== "none") {
-      const el = viewRef.current?.querySelector(".screen") as HTMLElement | null;
-      if (el) {
-        capturedExit = {
-          key: pathname,
-          dir: capturedDir,
-          html: el.innerHTML,
-          scrollTop: el.scrollTop
-        };
+      entryRef.current = { dir: capturedDir, path: pathname, claimed: false };
+      // Prefer the snapshot taken at click time: by this render the router may
+      // already have swapped the children, and an empty viewport would make the
+      // incoming screen slide in over nothing.
+      const snapshot = takePendingSnapshot();
+      const el = snapshot ? null : (viewRef.current?.querySelector(".screen") as HTMLElement | null);
+      const outgoing = snapshot ?? (el ? { html: el.innerHTML, scrollTop: el.scrollTop } : null);
+      if (outgoing) {
+        pendingExitRef.current = { key: pathname, dir: capturedDir, ...outgoing };
       }
     }
   }
 
-  if (capturedExit && (exit === null || exit.key !== capturedExit.key)) {
-    setExit(capturedExit);
-  }
-  if (capturedDir !== direction) {
-    setDirection(capturedDir);
-  }
+  useLayoutEffect(() => {
+    const pending = pendingExitRef.current;
+    if (pending === null) return;
+    pendingExitRef.current = null;
+    setExit(pending);
+  }, [pathname]);
+
+  // A navigation that never commits a new screen (aborted, blocked) must not
+  // leave a direction behind for some later, unrelated screen to animate with.
+  useEffect(() => {
+    const entry = entryRef.current;
+    if (entry.claimed) return;
+    const timer = setTimeout(() => {
+      entry.claimed = true;
+    }, ENTRY_TTL_MS);
+    return () => clearTimeout(timer);
+  }, [pathname]);
 
   useEffect(() => {
     if (!exit) return;
@@ -104,7 +152,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     ghostPath !== null && rootPath(ghostPath) !== rootPath(pathname);
 
   return (
-    <NavDirectionContext.Provider value={direction}>
+    <NavEntryContext.Provider value={entryContext}>
       <div className={`shell ${isAdmin ? "shell--admin" : ""}`}>
         <NavProgress active={pending} />
         <span className="sr-only" role="status" aria-live="polite">
@@ -117,7 +165,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {exit !== null ? (
                 <div
                   key={exit.key}
-                  className={`screen screen--${exit.dir === "pop" ? "pop-out" : ""}`}
+                  className={`screen screen--${exit.dir}-out`}
                   aria-hidden="true"
                   inert
                   style={{
@@ -136,6 +184,6 @@ export function AppShell({ children }: { children: ReactNode }) {
           </ToastProvider>
         </SheetProvider>
       </div>
-    </NavDirectionContext.Provider>
+    </NavEntryContext.Provider>
   );
 }

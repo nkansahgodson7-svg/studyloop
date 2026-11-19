@@ -26,6 +26,24 @@ const PENDING_TIMEOUT_MS = 15_000;
 let pendingTarget: string | null = null;
 let pendingOrigin: string | null = null;
 
+// The screen that was on display when the navigation started. It is captured
+// synchronously on click because the route often commits children before the
+// shell sees the new pathname, which would leave the transition with nothing
+// to animate out from under the incoming screen.
+let pendingSnapshot: { html: string; scrollTop: number } | null = null;
+
+function captureSnapshot(): void {
+  const el = document.querySelector<HTMLElement>(".view .screen");
+  pendingSnapshot = el ? { html: el.innerHTML, scrollTop: el.scrollTop } : null;
+}
+
+/** Returns the outgoing screen captured when the navigation started, once. */
+export function takePendingSnapshot(): { html: string; scrollTop: number } | null {
+  const snapshot = pendingSnapshot;
+  pendingSnapshot = null;
+  return snapshot;
+}
+
 function emit(): void {
   for (const listener of listeners) listener();
 }
@@ -53,7 +71,10 @@ export function startOptimisticNav(href: string): void {
   // Clicking the screen you are already on is not a transition.
   if (rootPath(target) === rootPath(window.location.pathname)) return;
   if (pendingTarget === target) return;
-  if (pendingTarget === null) pendingOrigin = rootPath(window.location.pathname);
+  if (pendingTarget === null) {
+    pendingOrigin = rootPath(window.location.pathname);
+    captureSnapshot();
+  }
   pendingTarget = target;
   emit();
 }
@@ -63,6 +84,7 @@ export function settleOptimisticNav(): void {
   if (pendingTarget === null) return;
   pendingTarget = null;
   pendingOrigin = null;
+  pendingSnapshot = null;
   emit();
 }
 
