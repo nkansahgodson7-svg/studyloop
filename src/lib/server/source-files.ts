@@ -4,9 +4,11 @@ import { UTApi } from 'uploadthing/server';
 export const MAX_RELAYED_FILE_BYTES = 40 * 1024 * 1024;
 
 /**
- * Original uploads live in UploadThing (private ACL). Everything is optional:
- * without UPLOADTHING_TOKEN the app keeps working from extracted text and the
- * preview falls back to text thumbnails.
+ * Original uploads live in UploadThing. Private ACLs are paid-only there, so
+ * uploads fall back to the app's default ACL (public-read on the free plan) and
+ * are served by their unguessable URL. Everything is optional: without
+ * UPLOADTHING_TOKEN the app keeps working from extracted text and the preview
+ * falls back to text thumbnails.
  */
 export function sourceFilesEnabled(): boolean {
   return Boolean(process.env.UPLOADTHING_TOKEN?.trim());
@@ -26,8 +28,15 @@ export async function storeSourceFile(
   type: string
 ): Promise<string | null> {
   if (!sourceFilesEnabled()) return null;
+  const file = new File([bytes], name, { type });
   try {
-    const result = await utapi().uploadFiles(new File([bytes], name, { type }), { acl: 'private' });
+    const result = await utapi().uploadFiles(file, { acl: 'private' });
+    if (!result.error && result.data) return result.data.key;
+  } catch {
+    // Private ACL is paid-only; retry with the app's default ACL below.
+  }
+  try {
+    const result = await utapi().uploadFiles(file);
     if (result.error || !result.data) return null;
     return result.data.key;
   } catch {
@@ -61,28 +70,45 @@ export async function downloadSourceFileByCustomId(customId: string): Promise<Do
     // Resolving the custom id also hands back the real file key, which is what
     // the source row needs for previews later on.
     const found = await utapi().getFileUrls([customId], { keyType: 'customId' });
-    const key = found?.data?.[0]?.key;
+    const entry = found?.data?.[0];
+    const key = entry?.key;
     if (!key) return null;
-    const { ufsUrl } = await utapi().generateSignedURL(key);
-    const res = await fetch(ufsUrl);
-    if (!res.ok) return null;
-    const declared = Number(res.headers.get('content-length') ?? 0);
-    if (declared > MAX_RELAYED_FILE_BYTES) return null;
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_RELAYED_FILE_BYTES) return null;
-    return { bytes, key };
+    // Private files need a signature; public files (free plan) are readable at
+    // their unguessable URL. Try both so the relay works on either plan.
+    const urls: string[] = [];
+    try {
+      urls.push((await utapi().generateSignedURL(key)).ufsUrl);
+    } catch {
+      // Private files are paid-only; the public URL below may still work.
+    }
+    if (entry?.url && entry.url !== urls[0]) urls.push(entry.url);
+    for (const url of urls) {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const declared = Number(res.headers.get('content-length') ?? 0);
+      if (declared > MAX_RELAYED_FILE_BYTES) return null;
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_RELAYED_FILE_BYTES) return null;
+      return { bytes, key };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-/** Short-lived signed URL for a private file. */
+/** Short-lived signed URL for a private file, or the public URL on the free plan. */
 export async function signedSourceFileUrl(key: string): Promise<string | null> {
   if (!sourceFilesEnabled()) return null;
   try {
     const { ufsUrl } = await utapi().generateSignedURL(key, { expiresIn: '10 minutes' });
     return ufsUrl;
   } catch {
-    return null;
+    try {
+      const found = await utapi().getFileUrls([key]);
+      return found?.data?.[0]?.url ?? null;
+    } catch {
+      return null;
+    }
   }
 }

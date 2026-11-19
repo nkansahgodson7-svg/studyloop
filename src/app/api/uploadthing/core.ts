@@ -17,8 +17,14 @@ export const ourFileRouter = {
       return { userId: user.id, [UTFiles]: [{ customId: `${user.id}-${crypto.randomUUID()}` }] };
     })
     .onUploadComplete(async ({ metadata, file }) => {
-      // The dashboard can default to public; make privacy explicit regardless.
-      await new UTApi().updateACL(file.key, 'private');
+      // The dashboard can default to public; make privacy explicit when the
+      // plan supports it. Private ACL is paid-only on UploadThing, so a
+      // rejection here must not fail the upload on the free plan.
+      try {
+        await new UTApi().updateACL(file.key, 'private');
+      } catch {
+        // Free plan: keep the app's default ACL (public-read).
+      }
       return { userId: metadata.userId, key: file.key, customId: file.customId };
     })
 } satisfies FileRouter;
